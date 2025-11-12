@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PieChart, Pie, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +77,39 @@ const AdminDashboard = () => {
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<string | null>(null);
   const [newStatus, setNewStatus] = useState<string>('');
+  const [availabilityDialogOpen, setAvailabilityDialogOpen] = useState(false);
+  const [selectedDoctor, setSelectedDoctor] = useState<any>(null);
+  const [doctorAvailability, setDoctorAvailability] = useState<any[]>([]);
+  const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [newAvailability, setNewAvailability] = useState({
+    dayOfWeek: 'monday',
+    startTime: '09:00',
+    endTime: '17:00'
+  });
+  
+  // Specialty Management state
+  const [addSpecialtyOpen, setAddSpecialtyOpen] = useState(false);
+  const [editSpecialtyOpen, setEditSpecialtyOpen] = useState(false);
+  const [selectedSpecialty, setSelectedSpecialty] = useState<any>(null);
+  const [newSpecialty, setNewSpecialty] = useState({
+    name: '',
+    description: ''
+  });
+  
+  // Reports state
+  const [reportType, setReportType] = useState<string>('appointments');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportStats, setReportStats] = useState({
+    totalAppointments: 0,
+    totalRevenue: 0,
+    activePatients: 0,
+    completionRate: 0
+  });
+
+  // Chart colors
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
   // Handle campaign input changes
   const handleCampaignInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -363,6 +397,478 @@ const AdminDashboard = () => {
         dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
     }).length;
   }, [appointments]);
+
+  // Chart data for Reports & Analytics
+  const appointmentTypeData = useMemo(() => {
+    const online = appointments.filter(a => a.type === 'online').length;
+    const hospital = appointments.filter(a => a.type === 'hospital').length;
+    const home = appointments.filter(a => a.type === 'home').length;
+    
+    return [
+      { name: 'Online Visits', value: online },
+      { name: 'Hospital Visits', value: hospital },
+      { name: 'Home Visits', value: home }
+    ];
+  }, [appointments]);
+
+  const appointmentStatusData = useMemo(() => {
+    const pending = appointments.filter(a => a.status === 'pending').length;
+    const confirmed = appointments.filter(a => a.status === 'confirmed').length;
+    const completed = appointments.filter(a => a.status === 'completed').length;
+    const cancelled = appointments.filter(a => a.status === 'cancelled').length;
+    
+    return [
+      { name: 'Pending', value: pending },
+      { name: 'Confirmed', value: confirmed },
+      { name: 'Completed', value: completed },
+      { name: 'Cancelled', value: cancelled }
+    ];
+  }, [appointments]);
+
+  const clinicData = useMemo(() => {
+    const clinics = Array.from(new Set(appointments.map(a => a.clinic).filter(Boolean)));
+    return clinics.map(clinic => ({
+      name: clinic,
+      appointments: appointments.filter(a => a.clinic === clinic).length,
+      completed: appointments.filter(a => a.clinic === clinic && a.status === 'completed').length,
+      pending: appointments.filter(a => a.clinic === clinic && a.status === 'pending').length
+    }));
+  }, [appointments]);
+
+  // Calculate revenue from paid online consultations
+  const [onlineRevenue, setOnlineRevenue] = useState(0);
+  const [paidOnlineCount, setPaidOnlineCount] = useState(0);
+
+  useEffect(() => {
+    const calculateOnlineRevenue = async () => {
+      try {
+        // Get all paid online appointments
+        const { data: paidAppointments, error } = await supabase
+          .from('appointments')
+          .select('id, doctor_id, type')
+          .eq('type', 'online')
+          .eq('payment_status', 'paid');
+
+        if (error) throw error;
+
+        setPaidOnlineCount(paidAppointments?.length || 0);
+
+        // Get unique doctor IDs
+        const doctorIds = Array.from(new Set(paidAppointments?.map(apt => apt.doctor_id).filter(Boolean)));
+        
+        if (doctorIds.length === 0) {
+          setOnlineRevenue(0);
+          return;
+        }
+
+        // Fetch consultation fees for these doctors
+        const { data: doctors, error: doctorsError } = await supabase
+          .from('doctors')
+          .select('user_id, consultation_fee')
+          .in('user_id', doctorIds);
+
+        if (doctorsError) throw doctorsError;
+
+        // Create a map of doctor fees
+        const feeMap = new Map(doctors?.map(d => [d.user_id, d.consultation_fee || 0]) || []);
+
+        // Calculate total revenue
+        let total = 0;
+        paidAppointments?.forEach(apt => {
+          const fee = feeMap.get(apt.doctor_id) || 50; // Default fee of 50 if not set
+          total += Number(fee);
+        });
+
+        setOnlineRevenue(total);
+      } catch (error) {
+        console.error('Error calculating online revenue:', error);
+      }
+    };
+
+    calculateOnlineRevenue();
+  }, [appointments]);
+
+  // Calculate report statistics
+  useEffect(() => {
+    const calculateReportStats = async () => {
+      try {
+        // Total appointments
+        const totalApts = appointments.length;
+        
+        // Active patients (unique patient IDs)
+        const uniquePatients = new Set(appointments.map(a => a.patientName)).size;
+        
+        // Completion rate
+        const completedCount = appointments.filter(a => a.status === 'completed').length;
+        const completionRate = totalApts > 0 ? (completedCount / totalApts) * 100 : 0;
+        
+        setReportStats({
+          totalAppointments: totalApts,
+          totalRevenue: onlineRevenue,
+          activePatients: uniquePatients,
+          completionRate: Math.round(completionRate)
+        });
+      } catch (error) {
+        console.error('Error calculating report stats:', error);
+      }
+    };
+
+    calculateReportStats();
+  }, [appointments, onlineRevenue]);
+
+  // Generate CSV report
+  const generateCSVReport = async () => {
+    setGeneratingReport(true);
+    try {
+      let data: any[] = [];
+      let headers: string[] = [];
+      let filename = '';
+
+      const filterByDateRange = (items: any[]) => {
+        if (!startDate && !endDate) return items;
+        return items.filter(item => {
+          const itemDate = new Date(item.scheduledAtISO || item.created_at);
+          const start = startDate ? new Date(startDate) : new Date(0);
+          const end = endDate ? new Date(endDate) : new Date();
+          return itemDate >= start && itemDate <= end;
+        });
+      };
+
+      switch (reportType) {
+        case 'appointments':
+          data = filterByDateRange(appointments).map(apt => ({
+            'Appointment ID': apt.id.slice(0, 8).toUpperCase(),
+            'Patient Name': apt.patientName,
+            'Phone': apt.phone,
+            'Doctor': apt.doctor,
+            'Type': apt.type,
+            'Clinic': apt.clinic || 'N/A',
+            'Date': apt.scheduledDate,
+            'Time': apt.scheduledTime,
+            'Status': apt.status,
+            'Payment': apt.paymentStatus,
+            'Symptoms': apt.symptoms || 'N/A',
+            'Location': apt.location || 'N/A'
+          }));
+          filename = `appointments_report_${new Date().toISOString().split('T')[0]}.csv`;
+          break;
+
+        case 'revenue':
+          const revenueData = filterByDateRange(appointments)
+            .filter(a => a.paymentStatus === 'paid')
+            .map(apt => ({
+              'Date': apt.scheduledDate,
+              'Patient': apt.patientName,
+              'Doctor': apt.doctor,
+              'Type': apt.type,
+              'Clinic': apt.clinic || 'N/A',
+              'Amount': 'GHS 50.00' // Default amount
+            }));
+          data = revenueData;
+          filename = `revenue_report_${new Date().toISOString().split('T')[0]}.csv`;
+          break;
+
+        case 'doctors':
+          const doctorPerformance = doctorsData.map(doc => ({
+            'Doctor Name': `Dr. ${doc.profiles?.full_name || 'N/A'}`,
+            'Specialty': doc.specialties?.name || 'N/A',
+            'License': doc.license_number || 'N/A',
+            'Experience': doc.years_of_experience ? `${doc.years_of_experience} years` : 'N/A',
+            'Status': doc.available ? 'Available' : 'Unavailable',
+            'Total Appointments': appointments.filter(a => a.doctor === `Dr. ${doc.profiles?.full_name}`).length
+          }));
+          data = doctorPerformance;
+          filename = `doctor_performance_${new Date().toISOString().split('T')[0]}.csv`;
+          break;
+
+        case 'clinics':
+          const clinics = Array.from(new Set(appointments.map(a => a.clinic).filter(Boolean)));
+          const clinicData = clinics.map(clinic => ({
+            'Clinic Name': clinic,
+            'Total Appointments': appointments.filter(a => a.clinic === clinic).length,
+            'Completed': appointments.filter(a => a.clinic === clinic && a.status === 'completed').length,
+            'Pending': appointments.filter(a => a.clinic === clinic && a.status === 'pending').length,
+            'Cancelled': appointments.filter(a => a.clinic === clinic && a.status === 'cancelled').length
+          }));
+          data = clinicData;
+          filename = `clinic_analytics_${new Date().toISOString().split('T')[0]}.csv`;
+          break;
+      }
+
+      if (data.length === 0) {
+        toast({
+          title: "No Data",
+          description: "No data available for the selected criteria",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Convert to CSV
+      headers = Object.keys(data[0]);
+      const csvContent = [
+        headers.join(','),
+        ...data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
+      ].join('\n');
+
+      // Download CSV
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.click();
+
+      toast({
+        title: "Success",
+        description: "Report generated and downloaded successfully"
+      });
+    } catch (error: any) {
+      console.error('Error generating report:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to generate report",
+        variant: "destructive"
+      });
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  // Fetch doctor availability
+  const fetchDoctorAvailability = async (doctorId: string) => {
+    setLoadingAvailability(true);
+    try {
+      const { data, error } = await supabase
+        .from('doctor_availability')
+        .select('*')
+        .eq('doctor_id', doctorId)
+        .order('day_of_week', { ascending: true });
+
+      if (error) throw error;
+      setDoctorAvailability(data || []);
+    } catch (error) {
+      console.error('Error fetching doctor availability:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch doctor availability",
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingAvailability(false);
+    }
+  };
+
+  // Add new availability slot
+  const addAvailabilitySlot = async () => {
+    if (!selectedDoctor) return;
+
+    try {
+      const { error } = await supabase
+        .from('doctor_availability')
+        .insert([
+          {
+            doctor_id: selectedDoctor.user_id,
+            day_of_week: newAvailability.dayOfWeek,
+            start_time: newAvailability.startTime,
+            end_time: newAvailability.endTime
+          }
+        ]);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Availability slot added successfully"
+      });
+
+      // Refresh availability
+      fetchDoctorAvailability(selectedDoctor.user_id);
+
+      // Reset form
+      setNewAvailability({
+        dayOfWeek: 'monday',
+        startTime: '09:00',
+        endTime: '17:00'
+      });
+    } catch (error: any) {
+      console.error('Error adding availability:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add availability slot",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Delete availability slot
+  const deleteAvailabilitySlot = async (slotId: string) => {
+    try {
+      const { error } = await supabase
+        .from('doctor_availability')
+        .delete()
+        .eq('id', slotId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Availability slot deleted"
+      });
+
+      // Refresh availability
+      if (selectedDoctor) {
+        fetchDoctorAvailability(selectedDoctor.user_id);
+      }
+    } catch (error: any) {
+      console.error('Error deleting availability:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete availability slot",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Specialties with doctor counts
+  const [specialtiesWithCounts, setSpecialtiesWithCounts] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadSpecialtiesWithCounts = async () => {
+      if (!specialties) return;
+      
+      const specialtiesWithDoctorCounts = await Promise.all(
+        specialties.map(async (specialty) => {
+          const doctorCount = doctorsData.filter(
+            d => d.specialty_id === specialty.id
+          ).length;
+          
+          return {
+            ...specialty,
+            doctorCount
+          };
+        })
+      );
+      
+      setSpecialtiesWithCounts(specialtiesWithDoctorCounts);
+    };
+    
+    loadSpecialtiesWithCounts();
+  }, [specialties, doctorsData]);
+
+  // Add new specialty
+  const handleAddSpecialty = async () => {
+    if (!newSpecialty.name.trim()) {
+      toast({
+        title: "Error",
+        description: "Specialty name is required",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('specialties')
+        .insert([{
+          name: newSpecialty.name.trim(),
+          description: newSpecialty.description.trim() || null
+        }]);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Specialty added successfully"
+      });
+
+      setNewSpecialty({ name: '', description: '' });
+      setAddSpecialtyOpen(false);
+      fetchDoctors(); // Refresh data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add specialty",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Update specialty
+  const handleUpdateSpecialty = async () => {
+    if (!selectedSpecialty || !selectedSpecialty.name.trim()) {
+      toast({
+        title: "Error",
+        description: "Specialty name is required",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('specialties')
+        .update({
+          name: selectedSpecialty.name.trim(),
+          description: selectedSpecialty.description?.trim() || null
+        })
+        .eq('id', selectedSpecialty.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Specialty updated successfully"
+      });
+
+      setEditSpecialtyOpen(false);
+      setSelectedSpecialty(null);
+      fetchDoctors(); // Refresh data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update specialty",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Delete specialty
+  const handleDeleteSpecialty = async (specialtyId: string, doctorCount: number) => {
+    if (doctorCount > 0) {
+      toast({
+        title: "Cannot Delete",
+        description: `This specialty has ${doctorCount} doctor(s) assigned. Reassign them first.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!confirm('Are you sure you want to delete this specialty?')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('specialties')
+        .delete()
+        .eq('id', specialtyId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Specialty deleted successfully"
+      });
+
+      fetchDoctors(); // Refresh data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete specialty",
+        variant: "destructive"
+      });
+    }
+  };
 
   // Function to update appointment status
   const updateAppointmentStatus = async (appointmentId: string, newStatus: string) => {
@@ -759,9 +1265,18 @@ const AdminDashboard = () => {
                   </div>
                 )}
               {activeTab === "reports" && (
-                <Button>
-                  <Download className="w-4 h-4 mr-2" />
-                  Export Report
+                <Button onClick={generateCSVReport} disabled={generatingReport}>
+                  {generatingReport ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4 mr-2" />
+                      Export Report
+                    </>
+                  )}
                 </Button>
               )}
             </div>
@@ -771,7 +1286,7 @@ const AdminDashboard = () => {
           {activeTab === "overview" && (
             <div className="space-y-6">
               {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <Card>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -899,11 +1414,11 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
 
-                {/* <Card>
+                <Card>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Revenue (Online)
+                        Online Revenue
                       </CardTitle>
                       <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
                         <DollarSign className="w-5 h-5 text-success" />
@@ -912,15 +1427,13 @@ const AdminDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{stats.totalRevenue} GHS</div>
+                      <div className="text-3xl font-bold text-foreground">GHS {onlineRevenue.toFixed(2)}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <TrendingUp className="w-4 h-4 text-success" />
-                        <span className="text-success font-medium">↑ {stats.revenueTrend}%</span>
-                        <span className="text-muted-foreground">from last week</span>
+                        <span className="text-muted-foreground">{paidOnlineCount} paid consultation{paidOnlineCount !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                   </CardContent>
-                </Card> */}
+                </Card>
               </div>
 
               {/* New Requests for Confirmation */}
@@ -1252,12 +1765,20 @@ const AdminDashboard = () => {
 
           {/* Doctors Tab */}
           {activeTab === "doctors" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Medical Staff</CardTitle>
-                <CardDescription>Manage doctor profiles and specializations</CardDescription>
-              </CardHeader>
-              <CardContent>
+            <Tabs defaultValue="staff" className="space-y-6">
+              <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsTrigger value="staff">Medical Staff</TabsTrigger>
+                <TabsTrigger value="specialties">Specialties & Clinics</TabsTrigger>
+              </TabsList>
+
+              {/* Medical Staff Tab */}
+              <TabsContent value="staff">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Medical Staff</CardTitle>
+                    <CardDescription>Manage doctor profiles and specializations</CardDescription>
+                  </CardHeader>
+                  <CardContent>
                 {doctorsLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -1275,7 +1796,6 @@ const AdminDashboard = () => {
                         <TableHead>Contact</TableHead>
                         <TableHead>License</TableHead>
                         <TableHead>Experience</TableHead>
-                        <TableHead>Fee (GHS)</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -1307,9 +1827,6 @@ const AdminDashboard = () => {
                           <TableCell className="text-foreground">
                             {doctor.years_of_experience ? `${doctor.years_of_experience} years` : 'N/A'}
                           </TableCell>
-                          <TableCell className="text-foreground">
-                            {doctor.consultation_fee || 'N/A'}
-                          </TableCell>
                           <TableCell>
                             <Badge variant={doctor.available ? "default" : "secondary"}>
                               {doctor.available ? 'Available' : 'Unavailable'}
@@ -1317,6 +1834,18 @@ const AdminDashboard = () => {
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
+                              <Button 
+                                variant="ghost" 
+                                size="icon"
+                                onClick={() => {
+                                  setSelectedDoctor(doctor);
+                                  fetchDoctorAvailability(doctor.user_id);
+                                  setAvailabilityDialogOpen(true);
+                                }}
+                                title="Manage Availability"
+                              >
+                                <Clock className="w-4 h-4" />
+                              </Button>
                               <Button variant="ghost" size="icon">
                                 <Eye className="w-4 h-4" />
                               </Button>
@@ -1330,8 +1859,81 @@ const AdminDashboard = () => {
                     </TableBody>
                   </Table>
                 )}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Specialties & Clinics Tab */}
+              <TabsContent value="specialties">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>Specialties & Clinics</CardTitle>
+                        <CardDescription>Manage available medical specialties</CardDescription>
+                      </div>
+                      <Button onClick={() => setAddSpecialtyOpen(true)}>
+                        <PlusCircle className="w-4 h-4 mr-2" />
+                        Add Specialty
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                {specialtiesWithCounts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No specialties found. Add your first specialty to get started.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Specialty Name</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Doctors</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {specialtiesWithCounts.map((specialty) => (
+                        <TableRow key={specialty.id}>
+                          <TableCell className="font-medium">{specialty.name}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {specialty.description || 'No description'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{specialty.doctorCount}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setSelectedSpecialty(specialty);
+                                  setEditSpecialtyOpen(true);
+                                }}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteSpecialty(specialty.id, specialty.doctorCount)}
+                                disabled={specialty.doctorCount > 0}
+                              >
+                                <Trash2 className="w-4 h-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           )}
 
           {/* Follow-up Queue Tab - Deactivated */}
@@ -1606,6 +2208,92 @@ const AdminDashboard = () => {
           {/* Reports Tab */}
           {activeTab === "reports" && (
             <div className="space-y-6">
+              {/* Charts Section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Appointment Types Pie Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Appointment Types Distribution</CardTitle>
+                    <CardDescription>Breakdown by consultation method</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={appointmentTypeData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {appointmentTypeData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Appointment Status Pie Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Appointment Status</CardTitle>
+                    <CardDescription>Current status distribution</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={appointmentStatusData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {appointmentStatusData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Clinic Performance Bar Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Clinic Performance</CardTitle>
+                  <CardDescription>Appointments by clinic/specialty</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={clinicData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="appointments" fill="#3b82f6" name="Total" />
+                      <Bar dataKey="completed" fill="#10b981" name="Completed" />
+                      <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              {/* Report Generation Section */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Card>
                   <CardHeader>
@@ -1613,31 +2301,70 @@ const AdminDashboard = () => {
                     <CardDescription>Export data for analysis</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Report Type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="appointments">Appointments Report</SelectItem>
-                        <SelectItem value="revenue">Revenue Report</SelectItem>
-                        <SelectItem value="doctors">Doctor Performance</SelectItem>
-                        <SelectItem value="clinics">Clinic Analytics</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <div className="flex gap-4">
-                      <Input type="date" placeholder="Start Date" />
-                      <Input type="date" placeholder="End Date" />
+                    <div className="space-y-2">
+                      <Label htmlFor="reportType">Report Type</Label>
+                      <Select value={reportType} onValueChange={setReportType}>
+                        <SelectTrigger id="reportType">
+                          <SelectValue placeholder="Select report type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="appointments">Appointments Report</SelectItem>
+                          <SelectItem value="revenue">Revenue Report</SelectItem>
+                          <SelectItem value="doctors">Doctor Performance</SelectItem>
+                          <SelectItem value="clinics">Clinic Analytics</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="startDate">Start Date</Label>
+                        <Input
+                          id="startDate"
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="endDate">End Date</Label>
+                        <Input
+                          id="endDate"
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                        />
+                      </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button className="flex-1">
-                        <FileText className="w-4 h-4 mr-2" />
-                        Excel
-                      </Button>
-                      <Button className="flex-1" variant="outline">
-                        <Download className="w-4 h-4 mr-2" />
-                        PDF
+                      <Button 
+                        className="flex-1"
+                        onClick={generateCSVReport}
+                        disabled={generatingReport}
+                      >
+                        {generatingReport ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 mr-2" />
+                            Generate CSV
+                          </>
+                        )}
                       </Button>
                     </div>
+                    {(startDate || endDate) && (
+                      <div className="text-sm text-muted-foreground">
+                        {startDate && endDate ? (
+                          `Showing data from ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`
+                        ) : startDate ? (
+                          `Showing data from ${new Date(startDate).toLocaleDateString()} onwards`
+                        ) : (
+                          `Showing data up to ${new Date(endDate).toLocaleDateString()}`
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -1650,19 +2377,19 @@ const AdminDashboard = () => {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Total Appointments</span>
-                        <span className="text-2xl font-bold">1,247</span>
+                        <span className="text-2xl font-bold">{reportStats.totalAppointments.toLocaleString()}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Total Revenue</span>
-                        <span className="text-2xl font-bold">45,230 GHS</span>
+                        <span className="text-2xl font-bold">GHS {reportStats.totalRevenue.toFixed(2)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Active Patients</span>
-                        <span className="text-2xl font-bold">823</span>
+                        <span className="text-2xl font-bold">{reportStats.activePatients}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Completion Rate</span>
-                        <span className="text-2xl font-bold">94%</span>
+                        <span className="text-2xl font-bold">{reportStats.completionRate}%</span>
                       </div>
                     </div>
                   </CardContent>
@@ -1720,6 +2447,224 @@ const AdminDashboard = () => {
               }}
             >
               Update Status
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Specialty Dialog */}
+      <Dialog open={addSpecialtyOpen} onOpenChange={setAddSpecialtyOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Specialty</DialogTitle>
+            <DialogDescription>
+              Create a new medical specialty or clinic type
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="specialtyName">Specialty Name *</Label>
+              <Input
+                id="specialtyName"
+                placeholder="e.g., Cardiology"
+                value={newSpecialty.name}
+                onChange={(e) => setNewSpecialty({ ...newSpecialty, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="specialtyDescription">Description</Label>
+              <Textarea
+                id="specialtyDescription"
+                placeholder="Brief description of this specialty"
+                value={newSpecialty.description}
+                onChange={(e) => setNewSpecialty({ ...newSpecialty, description: e.target.value })}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddSpecialtyOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddSpecialty}>
+              <PlusCircle className="w-4 h-4 mr-2" />
+              Add Specialty
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Specialty Dialog */}
+      <Dialog open={editSpecialtyOpen} onOpenChange={setEditSpecialtyOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Specialty</DialogTitle>
+            <DialogDescription>
+              Update specialty information
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="editSpecialtyName">Specialty Name *</Label>
+              <Input
+                id="editSpecialtyName"
+                placeholder="e.g., Cardiology"
+                value={selectedSpecialty?.name || ''}
+                onChange={(e) => setSelectedSpecialty({ ...selectedSpecialty, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editSpecialtyDescription">Description</Label>
+              <Textarea
+                id="editSpecialtyDescription"
+                placeholder="Brief description of this specialty"
+                value={selectedSpecialty?.description || ''}
+                onChange={(e) => setSelectedSpecialty({ ...selectedSpecialty, description: e.target.value })}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditSpecialtyOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateSpecialty}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Doctor Availability Dialog */}
+      <Dialog open={availabilityDialogOpen} onOpenChange={setAvailabilityDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Manage Availability - Dr. {selectedDoctor?.profiles?.full_name}
+            </DialogTitle>
+            <DialogDescription>
+              Set the doctor's working hours for each day of the week
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Current Availability */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold">Current Availability</h3>
+              {loadingAvailability ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : doctorAvailability.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground border rounded-lg">
+                  No availability set. Add time slots below.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {doctorAvailability.map((slot) => (
+                    <div
+                      key={slot.id}
+                      className="flex items-center justify-between p-3 border rounded-lg bg-muted/30"
+                    >
+                      <div className="flex items-center gap-4">
+                        <Clock className="w-4 h-4 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium capitalize">
+                            {slot.day_of_week}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {slot.start_time} - {slot.end_time}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteAvailabilitySlot(slot.id)}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Add New Availability */}
+            <div className="space-y-3 border-t pt-4">
+              <h3 className="text-sm font-semibold">Add New Time Slot</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="dayOfWeek">Day of Week</Label>
+                  <Select
+                    value={newAvailability.dayOfWeek}
+                    onValueChange={(value) =>
+                      setNewAvailability((prev) => ({ ...prev, dayOfWeek: value }))
+                    }
+                  >
+                    <SelectTrigger id="dayOfWeek">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monday">Monday</SelectItem>
+                      <SelectItem value="tuesday">Tuesday</SelectItem>
+                      <SelectItem value="wednesday">Wednesday</SelectItem>
+                      <SelectItem value="thursday">Thursday</SelectItem>
+                      <SelectItem value="friday">Friday</SelectItem>
+                      <SelectItem value="saturday">Saturday</SelectItem>
+                      <SelectItem value="sunday">Sunday</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="startTime">Start Time</Label>
+                  <Input
+                    id="startTime"
+                    type="time"
+                    value={newAvailability.startTime}
+                    onChange={(e) =>
+                      setNewAvailability((prev) => ({
+                        ...prev,
+                        startTime: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="endTime">End Time</Label>
+                  <Input
+                    id="endTime"
+                    type="time"
+                    value={newAvailability.endTime}
+                    onChange={(e) =>
+                      setNewAvailability((prev) => ({
+                        ...prev,
+                        endTime: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <Button onClick={addAvailabilitySlot} className="w-full">
+                <PlusCircle className="w-4 h-4 mr-2" />
+                Add Time Slot
+              </Button>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAvailabilityDialogOpen(false);
+                setSelectedDoctor(null);
+                setDoctorAvailability([]);
+              }}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

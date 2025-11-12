@@ -87,9 +87,9 @@ const Index = () => {
 
           {/* Navigation */}
           <nav className="hidden md:flex items-center gap-8">
-            <Link to="/" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
+            {/* <Link to="/" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
               Home
-            </Link>
+            </Link> */}
             <Link to="/dashboard/patient" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
               My Appointments
             </Link>
@@ -155,7 +155,7 @@ const Index = () => {
                             <p className={`${slide.textColor} mb-6 text-sm md:text-base`}>
                               {slide.description}
                             </p>
-                            <Button 
+                            {/* <Button 
                               variant={slide.buttonVariant}
                               className="mt-4 bg-primary hover:bg-primary/90 text-white"
                               asChild
@@ -163,7 +163,7 @@ const Index = () => {
                               <Link to={slide.buttonLink}>
                                 {slide.buttonText}
                               </Link>
-                            </Button>
+                            </Button> */}
                           </div>
                         </CardContent>
                       </div>
@@ -192,7 +192,7 @@ const Index = () => {
           <div className="hidden md:block">
             <div className="relative w-full h-[500px] rounded-2xl overflow-hidden shadow-xl">
               <img 
-                src="/doctor-hero.jpg" 
+                src="/doctor.jpg" 
                 alt="Professional medical doctor in surgical attire" 
                 className="w-full h-full object-cover"
               />
@@ -427,7 +427,7 @@ const Index = () => {
           {/* Bottom Footer */}
           <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-gray-600">
-              &copy; 2024 Gameli's Hospital. All rights reserved.
+              &copy; 2025 Gameli's Hospital. All rights reserved.
             </p>
             <div className="flex items-center gap-4">
               <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
@@ -436,9 +436,9 @@ const Index = () => {
               <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
                 <Twitter className="w-5 h-5" />
               </a>
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
+              {/* <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
                 <Github className="w-5 h-5" />
-              </a>
+              </a> */}
             </div>
           </div>
         </div>

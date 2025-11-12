@@ -2,11 +2,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus } from "lucide-react";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useAuth } from "@/hooks/useAuth";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+
+interface Notification {
+  id: string;
+  type: 'new_appointment' | 'confirmed' | 'cancelled' | 'completed';
+  message: string;
+  time: string;
+  appointment: any;
+}
 
 const DoctorDashboard = () => {
   const { user, signOut } = useAuth(true);
@@ -22,6 +32,8 @@ const DoctorDashboard = () => {
   const [allAppointments, setAllAppointments] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const loadDoctor = async () => {
@@ -182,6 +194,126 @@ const DoctorDashboard = () => {
     loadAllAppointments();
   }, [user?.id, currentMonth]);
 
+  // Fetch recent activities/notifications
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Get appointments from the last 7 days
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const { data: recentAppointments, error } = await supabase
+          .from('appointments')
+          .select('*')
+          .eq('doctor_id', user.id)
+          .gte('created_at', sevenDaysAgo.toISOString())
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Enrich and convert to notifications
+        const recentNotifications = await Promise.all(
+          (recentAppointments || []).map(async (apt) => {
+            // Fetch patient profile
+            const { data: patientProfile } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', apt.patient_id)
+              .single();
+
+            const patientName = patientProfile?.full_name || 'Patient';
+            const date = new Date(apt.scheduled_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric'
+            });
+            const time = new Date(apt.scheduled_at).toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            });
+
+            let message = '';
+            let type: 'new_appointment' | 'confirmed' | 'cancelled' | 'completed' = 'new_appointment';
+
+            switch (apt.status) {
+              case 'pending':
+                message = `New appointment request from ${patientName} for ${date} at ${time}`;
+                type = 'new_appointment';
+                break;
+              case 'confirmed':
+                message = `Appointment with ${patientName} confirmed for ${date} at ${time}`;
+                type = 'confirmed';
+                break;
+              case 'cancelled':
+                message = `Appointment with ${patientName} on ${date} was cancelled`;
+                type = 'cancelled';
+                break;
+              case 'completed':
+                message = `Appointment with ${patientName} on ${date} completed`;
+                type = 'completed';
+                break;
+              default:
+                message = `Appointment update with ${patientName}`;
+            }
+
+            return {
+              id: apt.id,
+              type,
+              message,
+              time: apt.created_at,
+              appointment: apt
+            };
+          })
+        );
+
+        setNotifications(recentNotifications);
+        // Count pending appointments as unread
+        const unread = recentNotifications.filter(n => n.type === 'new_appointment').length;
+        setUnreadCount(unread);
+      } catch (error) {
+        console.error('Error fetching notifications:', error);
+      }
+    };
+
+    fetchNotifications();
+  }, [user?.id]);
+
+  // Format relative time for notifications
+  const formatRelativeTime = (timestamp: string) => {
+    const now = new Date();
+    const past = new Date(timestamp);
+    const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    return new Date(timestamp).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  // Get icon for notification type
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case 'new_appointment':
+        return <UserPlus className="w-5 h-5 text-primary" />;
+      case 'confirmed':
+        return <CheckCircle className="w-5 h-5 text-success" />;
+      case 'cancelled':
+        return <XCircle className="w-5 h-5 text-destructive" />;
+      case 'completed':
+        return <CheckCircle className="w-5 h-5 text-primary" />;
+      default:
+        return <Bell className="w-5 h-5 text-muted-foreground" />;
+    }
+  };
+
   const initials = useMemo(() => {
     if (!fullName) return "";
     const parts = fullName.trim().split(/\s+/);
@@ -297,9 +429,71 @@ const DoctorDashboard = () => {
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitcher />
-            <Button variant="ghost" size="icon">
-              <Bell className="w-5 h-5" />
-            </Button>
+            
+            {/* Notifications Popover */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative">
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                      {unreadCount}
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="end">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">Notifications</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Recent appointment activities
+                  </p>
+                </div>
+                <ScrollArea className="h-[400px]">
+                  {notifications.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <Bell className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+                      <p className="text-sm text-muted-foreground">No notifications yet</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {notifications.map((notification) => (
+                        <div
+                          key={notification.id}
+                          className="p-4 hover:bg-muted/50 transition-colors cursor-pointer"
+                        >
+                          <div className="flex gap-3">
+                            <div className="flex-shrink-0 mt-1">
+                              {getNotificationIcon(notification.type)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm">{notification.message}</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {formatRelativeTime(notification.time)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+                {notifications.length > 0 && (
+                  <div className="p-2 border-t">
+                    <Button
+                      variant="ghost"
+                      className="w-full text-sm"
+                      onClick={() => {
+                        setUnreadCount(0);
+                      }}
+                    >
+                      Mark all as read
+                    </Button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+
             <Button variant="ghost" size="icon">
               <Settings className="w-5 h-5" />
             </Button>

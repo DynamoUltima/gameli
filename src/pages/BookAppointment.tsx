@@ -451,7 +451,7 @@ const BookAppointment = () => {
                   </div>
                 </div>
 
-                {type !== "online" && (
+                {/* {type !== "online" && (
                   <div className="space-y-2">
                     <Label>Patient Type</Label>
                     <RadioGroup value={formData.patientType} onValueChange={(value) => setFormData({...formData, patientType: value})}>
@@ -465,7 +465,7 @@ const BookAppointment = () => {
                       </div>
                     </RadioGroup>
                   </div>
-                )}
+                )} */}
               </div>
             )}
 
@@ -626,12 +626,12 @@ const BookAppointment = () => {
                     <span className="text-muted-foreground">Clinic:</span>
                     <span className="font-medium capitalize">{specialties.find(s => s.id === formData.clinic)?.name}</span>
                   </div>
-                  {type === "hospital" && (
+                  {/* {type === "hospital" && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Price:</span>
                       <span className="font-medium">{formData.patientType === "new" ? "144" : "104"} GHS</span>
                     </div>
-                  )}
+                  )} */}
                 </div>
                 <div className="bg-warning/10 border border-warning/20 p-4 rounded-lg">
                   <p className="text-sm text-foreground">

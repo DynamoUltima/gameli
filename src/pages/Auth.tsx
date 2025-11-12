@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowLeft, Lock, Phone, User, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
@@ -21,13 +22,27 @@ const Auth = () => {
 
 
   useEffect(() => {
-  const testConnection = async () => {
-    const { data, error } = await supabase.from('profiles').select('count').limit(1);
-    console.log('Supabase connection test:', error ? 'Failed' : 'Success');
-    console.log('Connected to:', supabase);
-  };
-  testConnection();
-}, []);
+    const testConnection = async () => {
+      const { data, error } = await supabase.from('profiles').select('count').limit(1);
+      console.log('Supabase connection test:', error ? 'Failed' : 'Success');
+      console.log('Connected to:', supabase);
+    };
+    testConnection();
+  }, []);
+
+  // Check if user is coming from password reset email
+  useEffect(() => {
+    const checkPasswordReset = async () => {
+      const resetParam = searchParams.get('reset');
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      // If there's a session and reset param, user clicked the reset link
+      if (session && resetParam === 'true') {
+        setIsResettingPassword(true);
+      }
+    };
+    checkPasswordReset();
+  }, [searchParams]);
 
   // Check if user is already logged in and redirect based on role
   useEffect(() => {
@@ -62,11 +77,14 @@ const Auth = () => {
 
   // Registration form
   const [registerData, setRegisterData] = useState({
-    fullName: "",
+    firstName: "",
+    lastName: "",
+    otherName: "",
     phone: "",
     email: "",
     password: "",
     confirmPassword: "",
+    gender: "",
     role: 'patient' as 'patient' | 'doctor' | 'admin', // default role with proper typing
   });
 
@@ -76,9 +94,22 @@ const Auth = () => {
     password: ""
   });
 
+  // Password reset state
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!registerData.firstName.trim() || !registerData.lastName.trim()) {
+      toast.error("First name and last name are required");
+      return;
+    }
+
     if (registerData.password !== registerData.confirmPassword) {
       toast.error("Passwords do not match");
       return;
@@ -102,8 +133,11 @@ const Auth = () => {
         options: {
           emailRedirectTo: `${window.location.origin}${redirectTo}`,
           data: {
-            full_name: registerData.fullName,
+            first_name: registerData.firstName,
+            last_name: registerData.lastName,
+            other_name: registerData.otherName,
             phone: registerData.phone,
+            gender: registerData.gender || null,
             role: registerData.role,
           }
         }
@@ -139,6 +173,75 @@ const Auth = () => {
     } catch (error: any) {
       console.error("Registration error:", error);
       toast.error(error.message || "Failed to register. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!resetEmail.trim()) {
+      toast.error("Please enter your email address");
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/auth?reset=true`,
+      });
+
+      if (error) throw error;
+
+      toast.success("Password reset email sent! Check your inbox.");
+      setShowResetPassword(false);
+      setResetEmail("");
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      toast.error(error.message || "Failed to send reset email. Please try again.");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!newPassword || !confirmNewPassword) {
+      toast.error("Please enter and confirm your new password");
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) throw error;
+
+      toast.success("Password updated successfully! You can now login with your new password.");
+      
+      // Sign out and redirect to login
+      await supabase.auth.signOut();
+      setIsResettingPassword(false);
+      setNewPassword("");
+      setConfirmNewPassword("");
+      navigate('/auth');
+    } catch (error: any) {
+      console.error("Password update error:", error);
+      toast.error(error.message || "Failed to update password. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -199,6 +302,83 @@ const Auth = () => {
     }
   };
 
+  // Show password update form if user clicked reset link
+  if (isResettingPassword) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10 py-8">
+        <div className="container max-w-md mx-auto px-4">
+          <div className="flex items-center justify-between mb-6">
+            <Button variant="ghost" asChild>
+              <Link to="/"><ArrowLeft className="w-4 h-4 mr-2" />Back to Home</Link>
+            </Button>
+            <ThemeSwitcher />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Set New Password</CardTitle>
+              <CardDescription>
+                Enter your new password below
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUpdatePassword} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">New Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="new-password"
+                      type="password"
+                      placeholder="Minimum 6 characters"
+                      className="pl-10"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-new-password">Confirm New Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="confirm-new-password"
+                      type="password"
+                      placeholder="Re-enter your password"
+                      className="pl-10"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? "Updating..." : "Update Password"}
+                </Button>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsResettingPassword(false);
+                      navigate('/auth');
+                    }}
+                    className="text-sm text-muted-foreground hover:text-primary"
+                  >
+                    Back to login
+                  </button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10 py-8">
       <div className="container max-w-md mx-auto px-4">
@@ -258,16 +438,26 @@ const Auth = () => {
                     </div>
                   </div>
 
+                  <div className="flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(true)}
+                      className="text-sm text-primary hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+
                   <Button type="submit" className="w-full" disabled={isLoading}>
                     {isLoading ? "Logging in..." : "Login"}
                   </Button>
 
-                  <div className="text-center text-sm text-muted-foreground">
+                  {/* <div className="text-center text-sm text-muted-foreground">
                     Don't have an account?{" "}
                     <span className="text-primary cursor-pointer hover:underline">
                       Register here
                     </span>
-                  </div>
+                  </div> */}
                 </form>
               </CardContent>
             </Card>
@@ -285,15 +475,38 @@ const Auth = () => {
               <CardContent>
                 <form onSubmit={handleRegister} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="register-name">Full Name</Label>
+                    <Label htmlFor="register-first-name">First Name *</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Input
-                        id="register-name"
-                        placeholder="John Doe"
+                        id="register-first-name"
+                        placeholder="John"
                         className="pl-10"
-                        value={registerData.fullName}
-                        onChange={(e) => setRegisterData({ ...registerData, fullName: e.target.value })}
+                        value={registerData.firstName}
+                        onChange={(e) => setRegisterData({ ...registerData, firstName: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="register-other-name">Other Name</Label>
+                      <Input
+                        id="register-other-name"
+                        placeholder="Michael"
+                        value={registerData.otherName}
+                        onChange={(e) => setRegisterData({ ...registerData, otherName: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="register-last-name">Last Name *</Label>
+                      <Input
+                        id="register-last-name"
+                        placeholder="Doe"
+                        value={registerData.lastName}
+                        onChange={(e) => setRegisterData({ ...registerData, lastName: e.target.value })}
                         required
                       />
                     </div>
@@ -312,6 +525,22 @@ const Auth = () => {
                         required
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="register-gender">Gender</Label>
+                    <select
+                      id="register-gender"
+                      value={registerData.gender}
+                      onChange={(e) => setRegisterData({ ...registerData, gender: e.target.value })}
+                      className="w-full rounded-md border px-3 py-2 bg-transparent"
+                    >
+                      <option value="">Select gender</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
                   </div>
 
                   <div className="space-y-2">
@@ -383,17 +612,64 @@ const Auth = () => {
                     {isLoading ? "Creating account..." : "Create Account"}
                   </Button>
 
-                  <div className="text-center text-sm text-muted-foreground">
+                  {/* <div className="text-center text-sm text-muted-foreground">
                     Already have an account?{" "}
                     <span className="text-primary cursor-pointer hover:underline">
                       Login here
                     </span>
-                  </div>
+                  </div> */}
                 </form>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Reset Password Dialog */}
+        <Dialog open={showResetPassword} onOpenChange={setShowResetPassword}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset Password</DialogTitle>
+              <DialogDescription>
+                Enter your email address and we'll send you a link to reset your password.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleResetPassword}>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="reset-email">Email Address</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="reset-email"
+                      type="email"
+                      placeholder="your.email@example.com"
+                      className="pl-10"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowResetPassword(false);
+                    setResetEmail("");
+                  }}
+                  disabled={resetLoading}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={resetLoading}>
+                  {resetLoading ? "Sending..." : "Send Reset Link"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

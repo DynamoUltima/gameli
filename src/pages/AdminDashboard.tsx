@@ -95,6 +95,21 @@ const AdminDashboard = () => {
     name: '',
     description: ''
   });
+
+  // Admin Management state
+  const [addAdminOpen, setAddAdminOpen] = useState(false);
+  const [addingAdmin, setAddingAdmin] = useState(false);
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(true);
+  const [newAdmin, setNewAdmin] = useState({
+    firstName: '',
+    lastName: '',
+    otherName: '',
+    email: '',
+    phone: '',
+    gender: '',
+    password: ''
+  });
   
   // Reports state
   const [reportType, setReportType] = useState<string>('appointments');
@@ -283,6 +298,43 @@ const AdminDashboard = () => {
     };
 
     fetchCampaigns();
+  }, []);
+
+  // Fetch admin users
+  useEffect(() => {
+    const fetchAdmins = async () => {
+      try {
+        const { data: adminRoles, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'admin');
+
+        if (rolesError) throw rolesError;
+
+        if (!adminRoles || adminRoles.length === 0) {
+          setAdminUsers([]);
+          setLoadingAdmins(false);
+          return;
+        }
+
+        // Fetch profiles for admin users
+        const adminUserIds = adminRoles.map(r => r.user_id);
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, other_name, full_name, email, phone')
+          .in('id', adminUserIds);
+
+        if (profilesError) throw profilesError;
+
+        setAdminUsers(profiles || []);
+      } catch (error) {
+        console.error('Error fetching admin users:', error);
+      } finally {
+        setLoadingAdmins(false);
+      }
+    };
+
+    fetchAdmins();
   }, []);
 
   // All doctors are sourced from the database via useDoctors()
@@ -870,6 +922,98 @@ const AdminDashboard = () => {
     }
   };
 
+  // Add new admin user
+  const handleAddAdmin = async () => {
+    if (!newAdmin.firstName.trim() || !newAdmin.lastName.trim() || !newAdmin.email.trim() || !newAdmin.password.trim()) {
+      toast({
+        title: "Error",
+        description: "First name, last name, email, and password are required",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (newAdmin.password.length < 6) {
+      toast({
+        title: "Error",
+        description: "Password must be at least 6 characters",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setAddingAdmin(true);
+    try {
+      // Create the admin user account
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newAdmin.email,
+        password: newAdmin.password,
+        options: {
+          data: {
+            first_name: newAdmin.firstName,
+            last_name: newAdmin.lastName,
+            other_name: newAdmin.otherName || '',
+            phone: newAdmin.phone,
+            gender: newAdmin.gender || null,
+          },
+        },
+      });
+
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Failed to create user');
+
+      // Set user role to admin
+      const { error: roleError } = await supabase
+        .from('user_roles')
+        .update({ role: 'admin' })
+        .eq('user_id', authData.user.id);
+
+      if (roleError) throw roleError;
+
+      toast({
+        title: "Success",
+        description: "Admin account created successfully"
+      });
+
+      // Refresh admin list
+      const { data: adminRoles } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'admin');
+
+      if (adminRoles && adminRoles.length > 0) {
+        const adminUserIds = adminRoles.map(r => r.user_id);
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, other_name, full_name, email, phone')
+          .in('id', adminUserIds);
+
+        setAdminUsers(profiles || []);
+      }
+
+      // Reset form
+      setNewAdmin({
+        firstName: '',
+        lastName: '',
+        otherName: '',
+        email: '',
+        phone: '',
+        gender: '',
+        password: ''
+      });
+      setAddAdminOpen(false);
+    } catch (error: any) {
+      console.error('Error creating admin:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create admin account",
+        variant: "destructive"
+      });
+    } finally {
+      setAddingAdmin(false);
+    }
+  };
+
   // Function to update appointment status
   const updateAppointmentStatus = async (appointmentId: string, newStatus: string) => {
     try {
@@ -1039,12 +1183,12 @@ const AdminDashboard = () => {
               Appointments
             </Button>
             <Button
-              variant={activeTab === "doctors" ? "default" : "ghost"}
+              variant={activeTab === "users" ? "default" : "ghost"}
               className="w-full justify-start"
-              onClick={() => setActiveTab("doctors")}
+              onClick={() => setActiveTab("users")}
             >
               <Users className="w-4 h-4 mr-3" />
-              Doctors
+              User Management
             </Button>
             {/* Follow-up Queue Tab - Deactivated */}
             {/* <Button
@@ -1108,7 +1252,7 @@ const AdminDashboard = () => {
               <h1 className="text-3xl font-bold text-foreground">
                 {activeTab === "overview" && "Dashboard Overview"}
                 {activeTab === "appointments" && "Appointments Management"}
-                {activeTab === "doctors" && "Doctors Management"}
+                {activeTab === "users" && "User Management"}
                 {/* {activeTab === "followup" && "Follow-up Queue"} */}
                
                 {activeTab === "communication" && "Patient Communication"}
@@ -1122,12 +1266,6 @@ const AdminDashboard = () => {
               <Button variant="outline" size="icon">
                 <Bell className="w-4 h-4" />
               </Button>
-              {activeTab === "doctors" && (
-                <Button onClick={() => setAddDoctorOpen(true)}>
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Add Doctor
-                </Button>
-              )}
                {activeTab === "campaigns" && (
                   <div className="flex items-center justify-between w-full">
                     <span>Awareness Campaigns</span>
@@ -1763,22 +1901,102 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {/* Doctors Tab */}
-          {activeTab === "doctors" && (
-            <Tabs defaultValue="staff" className="space-y-6">
-              <TabsList className="grid w-full max-w-md grid-cols-2">
-                <TabsTrigger value="staff">Medical Staff</TabsTrigger>
-                <TabsTrigger value="specialties">Specialties & Clinics</TabsTrigger>
+          {/* User Management Tab */}
+          {activeTab === "users" && (
+            <Tabs defaultValue="admins" className="space-y-6">
+              <TabsList className="grid w-full max-w-2xl grid-cols-3">
+                <TabsTrigger value="admins">Administrators</TabsTrigger>
+                <TabsTrigger value="doctors">Doctors</TabsTrigger>
+                <TabsTrigger value="patients">Patients</TabsTrigger>
               </TabsList>
 
-              {/* Medical Staff Tab */}
-              <TabsContent value="staff">
+              {/* Administrators Tab */}
+              <TabsContent value="admins">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Medical Staff</CardTitle>
-                    <CardDescription>Manage doctor profiles and specializations</CardDescription>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>Administrator Accounts</CardTitle>
+                        <CardDescription>Manage system administrators</CardDescription>
+                      </div>
+                      <Button onClick={() => setAddAdminOpen(true)}>
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Add Admin
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent>
+                    {loadingAdmins ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                      </div>
+                    ) : adminUsers.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No admin users found
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Phone</TableHead>
+                            <TableHead>Role</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {adminUsers.map((admin) => {
+                            const fullName = admin.full_name || `${admin.first_name} ${admin.last_name}`.trim();
+                            const initials = fullName.trim().split(/\s+/).slice(0, 2).map(n => n[0]?.toUpperCase() || "").join("");
+                            return (
+                              <TableRow key={admin.id}>
+                                <TableCell>
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                                      <span className="text-sm font-bold text-destructive">{initials || "AD"}</span>
+                                    </div>
+                                    <div className="font-medium">{fullName}</div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>{admin.email}</TableCell>
+                                <TableCell>{admin.phone || 'N/A'}</TableCell>
+                                <TableCell>
+                                  <Badge variant="destructive">Admin</Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Doctors Tab */}
+              <TabsContent value="doctors">
+                <Tabs defaultValue="staff" className="space-y-6">
+                  <TabsList className="grid w-full max-w-md grid-cols-2">
+                    <TabsTrigger value="staff">Medical Staff</TabsTrigger>
+                    <TabsTrigger value="specialties">Specialties & Clinics</TabsTrigger>
+                  </TabsList>
+
+                  {/* Medical Staff Sub-Tab */}
+                  <TabsContent value="staff">
+                    <Card>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle>Medical Staff</CardTitle>
+                            <CardDescription>Manage doctor profiles and specializations</CardDescription>
+                          </div>
+                          <Button onClick={() => setAddDoctorOpen(true)}>
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Add Doctor
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
                 {doctorsLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -1859,12 +2077,12 @@ const AdminDashboard = () => {
                     </TableBody>
                   </Table>
                 )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
 
-              {/* Specialties & Clinics Tab */}
-              <TabsContent value="specialties">
+                  {/* Specialties & Clinics Sub-Tab */}
+                  <TabsContent value="specialties">
                 <Card>
                   <CardHeader>
                     <div className="flex items-center justify-between">
@@ -1930,6 +2148,49 @@ const AdminDashboard = () => {
                     </TableBody>
                   </Table>
                 )}
+                    </CardContent>
+                  </Card>
+                  </TabsContent>
+                </Tabs>
+              </TabsContent>
+
+              {/* Patients Tab */}
+              <TabsContent value="patients">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Patient Accounts</CardTitle>
+                    <CardDescription>View and manage patient information</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="relative flex-1">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input placeholder="Search patients by name or email..." className="pl-9" />
+                        </div>
+                        <Select defaultValue="all">
+                          <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Filter by status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Patients</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="text-center py-12 text-muted-foreground">
+                        <Users className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                        <p className="font-medium mb-2">Patient management coming soon</p>
+                        <p className="text-sm">
+                          View patient details, appointment history, and more
+                        </p>
+                        <p className="text-sm mt-2">
+                          Currently showing {totalPatients} registered patients
+                        </p>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -2530,6 +2791,125 @@ const AdminDashboard = () => {
             </Button>
             <Button onClick={handleUpdateSpecialty}>
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Admin Dialog */}
+      <Dialog open={addAdminOpen} onOpenChange={setAddAdminOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add New Administrator</DialogTitle>
+            <DialogDescription>
+              Create a new admin account with full system access
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="adminFirstName">First Name *</Label>
+              <Input
+                id="adminFirstName"
+                placeholder="John"
+                value={newAdmin.firstName}
+                onChange={(e) => setNewAdmin({ ...newAdmin, firstName: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="adminOtherName">Other Name</Label>
+                <Input
+                  id="adminOtherName"
+                  placeholder="Michael"
+                  value={newAdmin.otherName}
+                  onChange={(e) => setNewAdmin({ ...newAdmin, otherName: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="adminLastName">Last Name *</Label>
+                <Input
+                  id="adminLastName"
+                  placeholder="Doe"
+                  value={newAdmin.lastName}
+                  onChange={(e) => setNewAdmin({ ...newAdmin, lastName: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adminEmail">Email Address *</Label>
+              <Input
+                id="adminEmail"
+                type="email"
+                placeholder="admin@gamelishospital.com"
+                value={newAdmin.email}
+                onChange={(e) => setNewAdmin({ ...newAdmin, email: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adminPhone">Phone Number</Label>
+              <Input
+                id="adminPhone"
+                placeholder="+233 24 123 4567"
+                value={newAdmin.phone}
+                onChange={(e) => setNewAdmin({ ...newAdmin, phone: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adminGender">Gender</Label>
+              <Select
+                value={newAdmin.gender}
+                onValueChange={(value) => setNewAdmin({ ...newAdmin, gender: value })}
+              >
+                <SelectTrigger id="adminGender">
+                  <SelectValue placeholder="Select gender" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="adminPassword">Password *</Label>
+              <Input
+                id="adminPassword"
+                type="password"
+                placeholder="Minimum 6 characters"
+                value={newAdmin.password}
+                onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })}
+              />
+            </div>
+
+            <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg">
+              <p className="text-sm text-foreground">
+                <strong>Note:</strong> Admin users have full access to all system features including user management, appointments, and settings.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddAdminOpen(false)} disabled={addingAdmin}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddAdmin} disabled={addingAdmin}>
+              {addingAdmin ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Create Admin
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -34,8 +34,11 @@ import { Specialty } from '@/hooks/useDoctors';
 const formSchema = z.object({
   email: z.string().email({ message: 'Invalid email address' }),
   password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
-  full_name: z.string().min(2, { message: 'Name must be at least 2 characters' }),
+  first_name: z.string().min(2, { message: 'First name must be at least 2 characters' }),
+  last_name: z.string().min(2, { message: 'Last name must be at least 2 characters' }),
+  other_name: z.string().optional(),
   phone: z.string().min(10, { message: 'Phone number must be at least 10 characters' }),
+  gender: z.string().optional(),
   specialty_id: z.string().min(1, { message: 'Please select a specialty' }),
   license_number: z.string().min(1, { message: 'License number is required' }),
   years_of_experience: z.string().min(1, { message: 'Years of experience is required' }),
@@ -72,8 +75,11 @@ export const AddDoctorDialog = ({
     defaultValues: {
       email: '',
       password: '',
-      full_name: '',
+      first_name: '',
+      last_name: '',
+      other_name: '',
       phone: '',
+      gender: '',
       specialty_id: '',
       license_number: '',
       years_of_experience: '',
@@ -90,8 +96,11 @@ export const AddDoctorDialog = ({
         password: values.password,
         options: {
           data: {
-            full_name: values.full_name,
+            first_name: values.first_name,
+            last_name: values.last_name,
+            other_name: values.other_name || '',
             phone: values.phone,
+            gender: values.gender || null,
           },
         },
       });
@@ -213,17 +222,48 @@ export const AddDoctorDialog = ({
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name="full_name"
+              name="first_name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Full Name</FormLabel>
+                  <FormLabel>First Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="Dr. John Doe" {...field} />
+                    <Input placeholder="John" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
+            
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="other_name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Other Name (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Michael" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="last_name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Last Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Doe" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
             <FormField
               control={form.control}
               name="email"
@@ -263,6 +303,31 @@ export const AddDoctorDialog = ({
                 </FormItem>
               )}
             />
+            
+            <FormField
+              control={form.control}
+              name="gender"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Gender (Optional)</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select gender" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
             <FormField
               control={form.control}
               name="specialty_id"

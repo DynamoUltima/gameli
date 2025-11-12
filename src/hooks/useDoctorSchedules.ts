@@ -105,32 +105,64 @@ export const useDoctorSchedules = (doctorId?: string) => {
     try {
       console.log('Getting available slots for doctor:', doctorId, 'on date:', date);
       
-      // Generate time slots for the day (9 AM - 5 PM, 30-minute intervals)
-      const slots: string[] = [];
-      const startHour = 9; // 9 AM
-      const endHour = 17;  // 5 PM (5:00 PM)
+      // Get the day of week for the selected date
+      const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const dayOfWeek = daysOfWeek[date.getDay()];
       
-      // Create date objects for the selected date
-      const slotDate = new Date(date);
-      slotDate.setHours(startHour, 0, 0, 0);
-      slotDate.setMinutes(0);
-      slotDate.setSeconds(0);
-      slotDate.setMilliseconds(0);
+      // Check if doctor has availability set for this day (can have multiple slots)
+      const { data: availabilitySlots, error: availabilityError } = await supabase
+        .from('doctor_availability')
+        .select('start_time, end_time')
+        .eq('doctor_id', doctorId)
+        .eq('day_of_week', dayOfWeek);
       
-      const endDate = new Date(date);
-      endDate.setHours(endHour, 0, 0, 0);
-      endDate.setMinutes(0);
-      endDate.setSeconds(0);
-      endDate.setMilliseconds(0);
+      if (availabilityError) {
+        console.error('Error fetching doctor availability:', availabilityError);
+      }
       
-      // 30-minute slots
-      const slotDuration = 30 * 60 * 1000; // 30 minutes in ms
+      // If no availability is set for this day, doctor doesn't work on this day
+      if (!availabilitySlots || availabilitySlots.length === 0) {
+        console.log('No availability set for', dayOfWeek, '- doctor does not work on this day');
+        return [];
+      }
+      
+      console.log(`Doctor has ${availabilitySlots.length} availability slot(s) for ${dayOfWeek}:`, availabilitySlots);
+      
+      // Generate slots for each availability period
       const allSlots: Date[] = [];
       
-      while (slotDate < endDate) {
-        allSlots.push(new Date(slotDate));
-        slotDate.setTime(slotDate.getTime() + slotDuration);
-      }
+      availabilitySlots.forEach((availability) => {
+        // Parse start_time (format: "HH:MM:SS" or "HH:MM")
+        const startParts = availability.start_time.split(':');
+        const startHour = parseInt(startParts[0], 10);
+        const startMinute = parseInt(startParts[1] || '0', 10);
+        
+        // Parse end_time
+        const endParts = availability.end_time.split(':');
+        const endHour = parseInt(endParts[0], 10);
+        const endMinute = parseInt(endParts[1] || '0', 10);
+        
+        console.log(`Generating slots from ${startHour}:${startMinute} to ${endHour}:${endMinute}`);
+        
+        // Create slots for this availability period
+        const slotDate = new Date(date);
+        slotDate.setHours(startHour, startMinute, 0, 0);
+        slotDate.setSeconds(0);
+        slotDate.setMilliseconds(0);
+        
+        const endDate = new Date(date);
+        endDate.setHours(endHour, endMinute, 0, 0);
+        endDate.setSeconds(0);
+        endDate.setMilliseconds(0);
+        
+        // 30-minute slots
+        const slotDuration = 30 * 60 * 1000; // 30 minutes in ms
+        
+        while (slotDate < endDate) {
+          allSlots.push(new Date(slotDate));
+          slotDate.setTime(slotDate.getTime() + slotDuration);
+        }
+      });
       
       // Get existing appointments for this doctor on this date
       // doctorId is user_id, so we check appointments.doctor_id = doctorId

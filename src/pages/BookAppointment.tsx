@@ -214,6 +214,10 @@ const BookAppointment = () => {
       toast.error("Please select a clinic and describe your symptoms");
       return;
     }
+    if (step === 2 && type === "online" && !formData.doctor) {
+      toast.error("Please select a doctor for online appointments");
+      return;
+    }
     if (step === 3 && type === "online" && (!selectedDate || !selectedTime)) {
       toast.error("Please select an appointment date and time");
       return;
@@ -490,7 +494,9 @@ const BookAppointment = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="doctor">Preferred Doctor (Optional)</Label>
+                  <Label htmlFor="doctor">
+                    Preferred Doctor {type === "online" ? "*" : "(Optional)"}
+                  </Label>
                   <Select
                     value={formData.doctor}
                     onValueChange={(value) => setFormData({...formData, doctor: value})}
@@ -511,6 +517,11 @@ const BookAppointment = () => {
                   </Select>
                   {formData.clinic && doctorsForClinic.length === 0 && (
                     <p className="text-sm text-muted-foreground">No doctors available for this clinic yet.</p>
+                  )}
+                  {type === "online" && (
+                    <p className="text-sm text-primary">
+                      Required for online appointments to show available time slots
+                    </p>
                   )}
                 </div>
 
@@ -558,7 +569,13 @@ const BookAppointment = () => {
                   </div>
                 )}
                 <div className="mt-4">
-                  {isLoadingSlots ? (
+                  {!formData.doctor ? (
+                    <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
+                      <Clock className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                      <p className="font-medium">Select a doctor first</p>
+                      <p className="text-sm">Go back to Step 2 and choose a preferred doctor</p>
+                    </div>
+                  ) : isLoadingSlots ? (
                     <div className="flex items-center justify-center py-8">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                       <span className="ml-2">Loading available slots...</span>
@@ -577,11 +594,17 @@ const BookAppointment = () => {
                         </Button>
                       ))}
                     </div>
+                  ) : selectedDate && formData.doctor ? (
+                    <div className="text-center py-4 text-muted-foreground">
+                      <Clock className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                      <p className="font-medium">No available time slots for this date.</p>
+                      <p className="text-sm mt-2">The doctor may not work on this day or all slots are booked.</p>
+                      <p className="text-sm">Please select another date or try a different doctor.</p>
+                    </div>
                   ) : (
                     <div className="text-center py-4 text-muted-foreground">
                       <Clock className="mx-auto h-8 w-8 mb-2 opacity-50" />
-                      <p>No available time slots for the selected date.</p>
-                      <p className="text-sm">Please select another date or try a different doctor.</p>
+                      <p>Select a date to see available time slots</p>
                     </div>
                   )}
                 </div>

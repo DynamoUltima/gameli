@@ -82,7 +82,7 @@ const Index = () => {
             <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center transform rotate-45">
               <Heart className="w-6 h-6 text-primary -rotate-45" fill="currentColor" />
             </div>
-            <span className="text-2xl font-bold text-[hsl(222,47%,11%)]">Gameli's Hospital</span>
+            <span className="text-2xl font-bold text-[hsl(222,47%,11%)]"> St Gameliel's Hospital</span>
           </Link>
 
           {/* Navigation */}

@@ -90,9 +90,9 @@ const Index = () => {
             {/* <Link to="/" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
               Home
             </Link> */}
-            <Link to="/dashboard/patient" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
+            {/* <Link to="/dashboard/patient" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
               My Appointments
-            </Link>
+            </Link> */}
             {/* <Link to="/doctors" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
               Doctors
             </Link> */}

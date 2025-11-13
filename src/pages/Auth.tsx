@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, Lock, Phone, User, Mail } from "lucide-react";
+import { ArrowLeft, Lock, Phone, User, Mail, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -81,6 +81,8 @@ const Auth = () => {
     lastName: "",
     otherName: "",
     phone: "",
+    dateOfBirth: "",
+    hospitalCardId: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -110,6 +112,11 @@ const Auth = () => {
       return;
     }
 
+    if (!registerData.dateOfBirth) {
+      toast.error("Date of birth is required");
+      return;
+    }
+
     if (registerData.password !== registerData.confirmPassword) {
       toast.error("Passwords do not match");
       return;
@@ -118,6 +125,22 @@ const Auth = () => {
     if (registerData.password.length < 6) {
       toast.error("Password must be at least 6 characters");
       return;
+    }
+
+    // Check if hospital card ID already exists (if provided)
+    if (registerData.hospitalCardId.trim()) {
+      const { data: existingCard, error: cardError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('hospital_card_id', registerData.hospitalCardId.trim())
+        .maybeSingle();
+
+      if (cardError) {
+        console.error('Error checking hospital card ID:', cardError);
+      } else if (existingCard) {
+        toast.error("This hospital card ID is already registered. Please contact the hospital if you believe this is an error.");
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -137,6 +160,8 @@ const Auth = () => {
             last_name: registerData.lastName,
             other_name: registerData.otherName,
             phone: registerData.phone,
+            date_of_birth: registerData.dateOfBirth || null,
+            hospital_card_id: registerData.hospitalCardId.trim() || null,
             gender: registerData.gender || null,
             role: registerData.role,
           }
@@ -528,6 +553,35 @@ const Auth = () => {
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="register-dob">Date of Birth *</Label>
+                    <Input
+                      id="register-dob"
+                      type="date"
+                      value={registerData.dateOfBirth}
+                      onChange={(e) => setRegisterData({ ...registerData, dateOfBirth: e.target.value })}
+                      max={new Date().toISOString().split('T')[0]}
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="register-hospital-card">Hospital Card ID (Optional)</Label>
+                    <div className="relative">
+                      <CreditCard className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="register-hospital-card"
+                        placeholder="e.g., HC-2025-001"
+                        className="pl-10"
+                        value={registerData.hospitalCardId}
+                        onChange={(e) => setRegisterData({ ...registerData, hospitalCardId: e.target.value })}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      If you already have a hospital card, enter the ID here to link your account
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="register-gender">Gender</Label>
                     <select
                       id="register-gender"
@@ -538,8 +592,8 @@ const Auth = () => {
                       <option value="">Select gender</option>
                       <option value="male">Male</option>
                       <option value="female">Female</option>
-                      <option value="other">Other</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option>
+                      {/* <option value="other">Other</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option> */}
                     </select>
                   </div>
 

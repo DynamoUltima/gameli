@@ -110,6 +110,15 @@ const AdminDashboard = () => {
     gender: '',
     password: ''
   });
+
+  // Patient Management state
+  const [patientUsers, setPatientUsers] = useState<any[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  const [patientSearchQuery, setPatientSearchQuery] = useState('');
+  const [editPatientOpen, setEditPatientOpen] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<any>(null);
+  const [updatingPatient, setUpdatingPatient] = useState(false);
+  const [hospitalCardId, setHospitalCardId] = useState('');
   
   // Reports state
   const [reportType, setReportType] = useState<string>('appointments');
@@ -321,7 +330,7 @@ const AdminDashboard = () => {
         const adminUserIds = adminRoles.map(r => r.user_id);
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
-          .select('id, first_name, last_name, other_name, full_name, email, phone')
+          .select('id, first_name, last_name, other_name, full_name, email, phone, gender')
           .in('id', adminUserIds);
 
         if (profilesError) throw profilesError;
@@ -335,6 +344,44 @@ const AdminDashboard = () => {
     };
 
     fetchAdmins();
+  }, []);
+
+  // Fetch patient users
+  useEffect(() => {
+    const fetchPatients = async () => {
+      try {
+        const { data: patientRoles, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'patient');
+
+        if (rolesError) throw rolesError;
+
+        if (!patientRoles || patientRoles.length === 0) {
+          setPatientUsers([]);
+          setLoadingPatients(false);
+          return;
+        }
+
+        // Fetch profiles for patient users
+        const patientUserIds = patientRoles.map(r => r.user_id);
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, other_name, full_name, email, phone, gender, date_of_birth, hospital_card_id, created_at')
+          .in('id', patientUserIds)
+          .order('created_at', { ascending: false });
+
+        if (profilesError) throw profilesError;
+
+        setPatientUsers(profiles || []);
+      } catch (error) {
+        console.error('Error fetching patient users:', error);
+      } finally {
+        setLoadingPatients(false);
+      }
+    };
+
+    fetchPatients();
   }, []);
 
   // All doctors are sourced from the database via useDoctors()
@@ -1011,6 +1058,139 @@ const AdminDashboard = () => {
       });
     } finally {
       setAddingAdmin(false);
+    }
+  };
+
+  // Delete user (admin, doctor, or patient)
+  const handleDeleteUser = async (userId: string, userType: 'admin' | 'doctor' | 'patient') => {
+    const confirmMessage = `Are you sure you want to delete this ${userType}? This action cannot be undone.`;
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      // Delete user role
+      const { error: roleError } = await supabase
+        .from('user_roles')
+        .delete()
+        .eq('user_id', userId);
+
+      if (roleError) throw roleError;
+
+      // If doctor, also delete from doctors table
+      if (userType === 'doctor') {
+        const { error: doctorError } = await supabase
+          .from('doctors')
+          .delete()
+          .eq('user_id', userId);
+
+        if (doctorError) throw doctorError;
+      }
+
+      // Note: We don't delete from profiles or auth.users to maintain data integrity
+      // The user just won't have a role anymore
+
+      toast({
+        title: "Success",
+        description: `${userType.charAt(0).toUpperCase() + userType.slice(1)} deleted successfully`
+      });
+
+      // Refresh the appropriate list
+      if (userType === 'admin') {
+        const { data: adminRoles } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'admin');
+
+        if (adminRoles && adminRoles.length > 0) {
+          const adminUserIds = adminRoles.map(r => r.user_id);
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, other_name, full_name, email, phone, gender')
+            .in('id', adminUserIds);
+
+          setAdminUsers(profiles || []);
+        } else {
+          setAdminUsers([]);
+        }
+      } else if (userType === 'doctor') {
+        fetchDoctors();
+      } else if (userType === 'patient') {
+        const { data: patientRoles } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'patient');
+
+        if (patientRoles && patientRoles.length > 0) {
+          const patientUserIds = patientRoles.map(r => r.user_id);
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, other_name, full_name, email, phone, gender, date_of_birth, hospital_card_id, created_at')
+            .in('id', patientUserIds)
+            .order('created_at', { ascending: false });
+
+          setPatientUsers(profiles || []);
+        } else {
+          setPatientUsers([]);
+        }
+      }
+    } catch (error: any) {
+      console.error(`Error deleting ${userType}:`, error);
+      toast({
+        title: "Error",
+        description: error.message || `Failed to delete ${userType}`,
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Update patient hospital card ID
+  const handleUpdatePatientCardId = async () => {
+    if (!selectedPatient) return;
+
+    setUpdatingPatient(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ hospital_card_id: hospitalCardId.trim() || null })
+        .eq('id', selectedPatient.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Patient hospital card ID updated successfully"
+      });
+
+      // Refresh patient list
+      const { data: patientRoles } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'patient');
+
+      if (patientRoles && patientRoles.length > 0) {
+        const patientUserIds = patientRoles.map(r => r.user_id);
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, other_name, full_name, email, phone, gender, date_of_birth, hospital_card_id, created_at')
+          .in('id', patientUserIds)
+          .order('created_at', { ascending: false });
+
+        setPatientUsers(profiles || []);
+      }
+
+      setEditPatientOpen(false);
+      setSelectedPatient(null);
+      setHospitalCardId('');
+    } catch (error: any) {
+      console.error('Error updating patient:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update patient information",
+        variant: "destructive"
+      });
+    } finally {
+      setUpdatingPatient(false);
     }
   };
 
@@ -1942,6 +2122,7 @@ const AdminDashboard = () => {
                             <TableHead>Email</TableHead>
                             <TableHead>Phone</TableHead>
                             <TableHead>Role</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1962,6 +2143,16 @@ const AdminDashboard = () => {
                                 <TableCell>{admin.phone || 'N/A'}</TableCell>
                                 <TableCell>
                                   <Badge variant="destructive">Admin</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleDeleteUser(admin.id, 'admin')}
+                                    title="Delete Admin"
+                                  >
+                                    <Trash2 className="w-4 h-4 text-destructive" />
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             );
@@ -2070,6 +2261,14 @@ const AdminDashboard = () => {
                               <Button variant="ghost" size="icon">
                                 <Edit className="w-4 h-4" />
                               </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteUser(doctor.user_id, 'doctor')}
+                                title="Delete Doctor"
+                              >
+                                <Trash2 className="w-4 h-4 text-destructive" />
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -2159,37 +2358,160 @@ const AdminDashboard = () => {
                 <Card>
                   <CardHeader>
                     <CardTitle>Patient Accounts</CardTitle>
-                    <CardDescription>View and manage patient information</CardDescription>
+                    <CardDescription>View and manage patient information ({patientUsers.length} total patients)</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
                       <div className="flex items-center gap-4">
                         <div className="relative flex-1">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                          <Input placeholder="Search patients by name or email..." className="pl-9" />
+                          <Input 
+                            placeholder="Search patients by name or email..." 
+                            className="pl-9"
+                            value={patientSearchQuery}
+                            onChange={(e) => setPatientSearchQuery(e.target.value)}
+                          />
                         </div>
-                        <Select defaultValue="all">
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Filter by status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Patients</SelectItem>
-                            <SelectItem value="active">Active</SelectItem>
-                            <SelectItem value="inactive">Inactive</SelectItem>
-                          </SelectContent>
-                        </Select>
                       </div>
                       
-                      <div className="text-center py-12 text-muted-foreground">
-                        <Users className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                        <p className="font-medium mb-2">Patient management coming soon</p>
-                        <p className="text-sm">
-                          View patient details, appointment history, and more
-                        </p>
-                        <p className="text-sm mt-2">
-                          Currently showing {totalPatients} registered patients
-                        </p>
-                      </div>
+                      {loadingPatients ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                        </div>
+                      ) : patientUsers.length === 0 ? (
+                        <div className="text-center py-12 text-muted-foreground">
+                          <Users className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                          <p className="font-medium mb-2">No patients found</p>
+                          <p className="text-sm">
+                            Patients will appear here once they register
+                          </p>
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Patient</TableHead>
+                              <TableHead>Date of Birth</TableHead>
+                              <TableHead>Hospital Card ID</TableHead>
+                              <TableHead>Email</TableHead>
+                              <TableHead>Phone</TableHead>
+                              <TableHead>Gender</TableHead>
+                              <TableHead>Registered</TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {patientUsers
+                              .filter(patient => {
+                                if (!patientSearchQuery) return true;
+                                const searchLower = patientSearchQuery.toLowerCase();
+                                const fullName = patient.full_name || `${patient.first_name} ${patient.last_name}`.trim();
+                                return (
+                                  fullName.toLowerCase().includes(searchLower) ||
+                                  patient.email?.toLowerCase().includes(searchLower) ||
+                                  patient.phone?.toLowerCase().includes(searchLower) ||
+                                  patient.hospital_card_id?.toLowerCase().includes(searchLower)
+                                );
+                              })
+                              .map((patient) => {
+                                const fullName = patient.full_name || `${patient.first_name} ${patient.last_name}`.trim();
+                                const initials = fullName.trim().split(/\s+/).slice(0, 2).map(n => n[0]?.toUpperCase() || "").join("");
+                                return (
+                                  <TableRow key={patient.id}>
+                                    <TableCell>
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                          <span className="text-sm font-bold text-primary">{initials || "PT"}</span>
+                                        </div>
+                                        <div>
+                                          <div className="font-medium">{fullName}</div>
+                                          {patient.other_name && (
+                                            <div className="text-xs text-muted-foreground">({patient.other_name})</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      {patient.date_of_birth ? (
+                                        <div>
+                                          <div className="font-medium">
+                                            {new Date(patient.date_of_birth).toLocaleDateString()}
+                                          </div>
+                                          <div className="text-xs text-muted-foreground">
+                                            Age: {Math.floor((new Date().getTime() - new Date(patient.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365))} years
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <span className="text-muted-foreground text-sm">N/A</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {patient.hospital_card_id ? (
+                                        <Badge variant="outline" className="font-mono">
+                                          {patient.hospital_card_id}
+                                        </Badge>
+                                      ) : (
+                                        <span className="text-muted-foreground text-sm">Not assigned</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>{patient.email || 'N/A'}</TableCell>
+                                    <TableCell>{patient.phone || 'N/A'}</TableCell>
+                                    <TableCell>
+                                      {patient.gender ? (
+                                        <Badge variant="outline" className="capitalize">
+                                          {patient.gender}
+                                        </Badge>
+                                      ) : (
+                                        <span className="text-muted-foreground">N/A</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {patient.created_at ? new Date(patient.created_at).toLocaleDateString() : 'N/A'}
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex gap-2">
+                                        <Button 
+                                          variant="ghost" 
+                                          size="icon"
+                                          onClick={() => {
+                                            setSelectedPatient(patient);
+                                            setHospitalCardId(patient.hospital_card_id || '');
+                                            setEditPatientOpen(true);
+                                          }}
+                                          title="Edit Patient Card ID"
+                                        >
+                                          <Edit className="w-4 h-4" />
+                                        </Button>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="icon"
+                                          onClick={() => {
+                                            // View patient appointments
+                                            setFilterDoctor("all");
+                                            setFilterType("all");
+                                            setFilterStatus("all");
+                                            setActiveTab("appointments");
+                                          }}
+                                          title="View Appointments"
+                                        >
+                                          <Eye className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => handleDeleteUser(patient.id, 'patient')}
+                                          title="Delete Patient"
+                                        >
+                                          <Trash2 className="w-4 h-4 text-destructive" />
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                          </TableBody>
+                        </Table>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -2871,8 +3193,8 @@ const AdminDashboard = () => {
                 <SelectContent>
                   <SelectItem value="male">Male</SelectItem>
                   <SelectItem value="female">Female</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                  <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                  {/* <SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem> */}
                 </SelectContent>
               </Select>
             </div>
@@ -2909,6 +3231,71 @@ const AdminDashboard = () => {
                   <UserPlus className="w-4 h-4 mr-2" />
                   Create Admin
                 </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Patient Dialog */}
+      <Dialog open={editPatientOpen} onOpenChange={setEditPatientOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Patient Information</DialogTitle>
+            <DialogDescription>
+              Update the hospital card ID for {selectedPatient?.full_name || `${selectedPatient?.first_name} ${selectedPatient?.last_name}`.trim()}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="hospitalCardId">Hospital Card ID</Label>
+              <Input
+                id="hospitalCardId"
+                placeholder="e.g., HC-2025-001"
+                value={hospitalCardId}
+                onChange={(e) => setHospitalCardId(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                This is the physical card number given to the patient on their first hospital visit.
+              </p>
+            </div>
+            <div className="p-3 bg-muted/50 border rounded-lg">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Patient Name:</span>
+                  <span className="font-medium">{selectedPatient?.full_name || `${selectedPatient?.first_name} ${selectedPatient?.last_name}`.trim()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Email:</span>
+                  <span className="font-medium">{selectedPatient?.email}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Phone:</span>
+                  <span className="font-medium">{selectedPatient?.phone}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setEditPatientOpen(false);
+                setSelectedPatient(null);
+                setHospitalCardId('');
+              }}
+              disabled={updatingPatient}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleUpdatePatientCardId} disabled={updatingPatient}>
+              {updatingPatient ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                'Save Changes'
               )}
             </Button>
           </DialogFooter>

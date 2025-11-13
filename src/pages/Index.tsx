@@ -7,6 +7,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 
 const Index = () => {
   const { user, loading } = useAuth();
@@ -73,16 +74,16 @@ const Index = () => {
   const bannerSlides = loadingCampaigns ? defaultBannerSlides : [...campaignSlides, ...defaultBannerSlides];
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-white sticky top-0 z-50 ">
+      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
             <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center transform rotate-45">
               <Heart className="w-6 h-6 text-primary -rotate-45" fill="currentColor" />
             </div>
-            <span className="text-2xl font-bold text-[hsl(222,47%,11%)]"> St Gameliel's Hospital</span>
+            <span className="text-2xl font-bold text-foreground"> St Gameliel's Hospital</span>
           </Link>
 
           {/* Navigation */}
@@ -103,6 +104,7 @@ const Index = () => {
 
           {/* Auth Buttons */}
           <div className="flex items-center gap-3">
+            <ThemeSwitcher />
             {!loading && (
               user ? (
                 <Button 
@@ -122,7 +124,6 @@ const Index = () => {
                   <Button 
                     asChild
                     variant="outline"
-                    className="bg-white border-2 border-primary text-primary hover:bg-primary hover:text-white transition-colors"
                   >
                     <Link to="/auth">Login</Link>
                   </Button>
@@ -133,8 +134,32 @@ const Index = () => {
         </div>
       </header>
 
+      {/* Hero Section */}
+      <section className="container mx-auto px-4 py-16 md:py-24">
+        <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="space-y-6">
+            <h1 className="text-5xl md:text-6xl font-bold text-foreground leading-tight">
+              Quality Healthcare,<br />Your Way
+          </h1>
+            <p className="text-xl text-muted-foreground">
+              Book your appointment online, at the hospital, or from the comfort of your home.
+            </p>
+          </div>
+          <div className="hidden md:block">
+            <div className="relative w-full h-[500px] rounded-2xl overflow-hidden shadow-xl">
+              <img 
+                src="/doctor.jpg" 
+                alt="Professional medical doctor in surgical attire" 
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Carousel Banner */}
-      <section className="w-full py-8 md:py-12 bg-white">
+      <section className="w-full py-8 md:py-12 bg-muted/30">
         <div className="container px-4 md:px-6">
           <Carousel className="w-full mx-auto">
             <CarouselContent>
@@ -143,7 +168,7 @@ const Index = () => {
                   <div className="p-1">
                     <Card className="border-0 overflow-hidden">
                       <div 
-                        className="relative w-full aspect-video md:aspect-[3/1] bg-cover bg-center bg-gray-100"
+                        className="relative w-full aspect-video md:aspect-[3/1] bg-contain bg-fill bg-muted"
                         style={{ backgroundImage: `url(${slide.image})` }}
                       >
                         <div className={`absolute inset-0 ${slide.overlay}`}></div>
@@ -178,48 +203,24 @@ const Index = () => {
         </div>
       </section>
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 py-16 md:py-24">
-        <div className="grid md:grid-cols-2 gap-12 items-center">
-          <div className="space-y-6">
-            <h1 className="text-5xl md:text-6xl font-bold text-[hsl(222,47%,11%)] leading-tight">
-              Quality Healthcare,<br />Your Way
-          </h1>
-            <p className="text-xl text-gray-600">
-              Book your appointment online, at the hospital, or from the comfort of your home.
-            </p>
-          </div>
-          <div className="hidden md:block">
-            <div className="relative w-full h-[500px] rounded-2xl overflow-hidden shadow-xl">
-              <img 
-                src="/doctor.jpg" 
-                alt="Professional medical doctor in surgical attire" 
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Choose Your Consultation Type */}
-      <section className="bg-gray-50 py-16 md:py-20">
+      <section className="bg-muted/30 py-16 md:py-20">
         <div className="container mx-auto px-4">
           <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold text-[hsl(222,47%,11%)] mb-3">
+            <h2 className="text-4xl font-bold text-foreground mb-3">
               Choose Your Consultation Type
             </h2>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
             {/* Online Consultation */}
-            <Card className="border border-gray-200 hover:shadow-lg transition-shadow bg-white">
+            <Card className="border hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Video className="w-8 h-8 text-primary" />
                 </div>
-                <CardTitle className="text-2xl text-[hsl(222,47%,11%)]">Online Consultation</CardTitle>
-                <CardDescription className="text-base text-gray-600">
+                <CardTitle className="text-2xl">Online Consultation</CardTitle>
+                <CardDescription className="text-base">
                   Convenient virtual care from anywhere.
                 </CardDescription>
               </CardHeader>
@@ -234,13 +235,13 @@ const Index = () => {
             </Card>
 
             {/* In-Person Hospital Visit */}
-            <Card className="border border-gray-200 hover:shadow-lg transition-shadow bg-white">
+            <Card className="border hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Hospital className="w-8 h-8 text-primary" />
                 </div>
-                <CardTitle className="text-2xl text-[hsl(222,47%,11%)]">In-Person Hospital Visit</CardTitle>
-                <CardDescription className="text-base text-gray-600">
+                <CardTitle className="text-2xl">In-Person Hospital Visit</CardTitle>
+                <CardDescription className="text-base">
                   Access to our full facilities and direct care.
                 </CardDescription>
               </CardHeader>
@@ -255,13 +256,13 @@ const Index = () => {
             </Card>
 
             {/* Home Visit */}
-            <Card className="border border-gray-200 hover:shadow-lg transition-shadow bg-white">
+            <Card className="border hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Home className="w-8 h-8 text-primary" />
                 </div>
-                <CardTitle className="text-2xl text-[hsl(222,47%,11%)]">Home Visit</CardTitle>
-                <CardDescription className="text-base text-gray-600">
+                <CardTitle className="text-2xl">Home Visit</CardTitle>
+                <CardDescription className="text-base">
                   Personalized care for those who prefer staying at home.
                 </CardDescription>
               </CardHeader>
@@ -279,52 +280,52 @@ const Index = () => {
       </section>
 
       {/* Care You Can Trust */}
-      <section className="py-16 md:py-20">
+      <section className="py-16 md:py-20 bg-background">
         <div className="container mx-auto px-4">
           <div className="text-center mb-12 max-w-3xl mx-auto">
-            <h2 className="text-4xl font-bold text-[hsl(222,47%,11%)] mb-4">
+            <h2 className="text-4xl font-bold text-foreground mb-4">
               Care You Can Trust
             </h2>
-            <p className="text-lg text-gray-600">
+            <p className="text-lg text-muted-foreground">
               We are committed to providing the best care possible with our team of dedicated professionals.
             </p>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
             {/* 24/7 Support */}
-            <Card className="border border-gray-200 hover:shadow-lg transition-shadow bg-white">
+            <Card className="border hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Headphones className="w-8 h-8 text-primary" />
                 </div>
-                <CardTitle className="text-2xl text-[hsl(222,47%,11%)]">24/7 Support</CardTitle>
-                <CardDescription className="text-base text-gray-600">
+                <CardTitle className="text-2xl">24/7 Support</CardTitle>
+                <CardDescription className="text-base">
                   Our support team is always available to assist you with your needs.
                 </CardDescription>
               </CardHeader>
             </Card>
 
             {/* Experienced Doctors */}
-            <Card className="border border-gray-200 hover:shadow-lg transition-shadow bg-white">
+            <Card className="border hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Users className="w-8 h-8 text-primary" />
                 </div>
-                <CardTitle className="text-2xl text-[hsl(222,47%,11%)]">Experienced Doctors</CardTitle>
-                <CardDescription className="text-base text-gray-600">
+                <CardTitle className="text-2xl">Experienced Doctors</CardTitle>
+                <CardDescription className="text-base">
                   Consult with our board-certified and highly experienced medical staff.
                 </CardDescription>
               </CardHeader>
             </Card>
 
             {/* Affordable Care */}
-            <Card className="border border-gray-200 hover:shadow-lg transition-shadow bg-white">
+            <Card className="border hover:shadow-lg transition-shadow">
             <CardHeader>
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <DollarSign className="w-8 h-8 text-primary" />
               </div>
-                <CardTitle className="text-2xl text-[hsl(222,47%,11%)]">Affordable Care</CardTitle>
-                <CardDescription className="text-base text-gray-600">
+                <CardTitle className="text-2xl">Affordable Care</CardTitle>
+                <CardDescription className="text-base">
                   Transparent and affordable pricing for all our consultation services.
               </CardDescription>
             </CardHeader>
@@ -334,30 +335,30 @@ const Index = () => {
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-50 border-t border-gray-200 py-12">
+      <footer className="bg-muted/30 border-t py-12">
         <div className="container mx-auto px-4">
           <div className="grid md:grid-cols-4 gap-8 mb-8">
             {/* Services */}
             <div>
-              <h3 className="text-[hsl(222,47%,11%)] font-bold text-lg mb-4">SERVICES</h3>
+              <h3 className="text-foreground font-bold text-lg mb-4">SERVICES</h3>
               <ul className="space-y-2">
                 <li>
-                  <Link to="/book/online" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/book/online" className="text-muted-foreground hover:text-primary transition-colors">
                     Online Consultation
                   </Link>
                 </li>
                 <li>
-                  <Link to="/book/hospital" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/book/hospital" className="text-muted-foreground hover:text-primary transition-colors">
                     Hospital Visit
                   </Link>
                 </li>
                 <li>
-                  <Link to="/book/home" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/book/home" className="text-muted-foreground hover:text-primary transition-colors">
                     Home Visit
                   </Link>
                 </li>
                 <li>
-                  <Link to="/doctors" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/doctors" className="text-muted-foreground hover:text-primary transition-colors">
                     Find a Doctor
                   </Link>
                 </li>
@@ -366,25 +367,25 @@ const Index = () => {
 
             {/* About */}
             <div>
-              <h3 className="text-[hsl(222,47%,11%)] font-bold text-lg mb-4">ABOUT</h3>
+              <h3 className="text-foreground font-bold text-lg mb-4">ABOUT</h3>
               <ul className="space-y-2">
                 <li>
-                  <Link to="/about" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/about" className="text-muted-foreground hover:text-primary transition-colors">
                     About Us
                   </Link>
                 </li>
                 <li>
-                  <Link to="/careers" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/careers" className="text-muted-foreground hover:text-primary transition-colors">
                     Careers
                   </Link>
                 </li>
                 <li>
-                  <Link to="/blog" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/blog" className="text-muted-foreground hover:text-primary transition-colors">
                     Blog
                   </Link>
                 </li>
                 <li>
-                  <Link to="/contact" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/contact" className="text-muted-foreground hover:text-primary transition-colors">
                     Contact Us
                   </Link>
                 </li>
@@ -393,20 +394,20 @@ const Index = () => {
 
             {/* Legal */}
             <div>
-              <h3 className="text-[hsl(222,47%,11%)] font-bold text-lg mb-4">LEGAL</h3>
+              <h3 className="text-foreground font-bold text-lg mb-4">LEGAL</h3>
               <ul className="space-y-2">
                 <li>
-                  <Link to="/privacy" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/privacy" className="text-muted-foreground hover:text-primary transition-colors">
                     Privacy Policy
                   </Link>
                 </li>
                 <li>
-                  <Link to="/terms" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/terms" className="text-muted-foreground hover:text-primary transition-colors">
                     Terms of Service
                   </Link>
                 </li>
                 <li>
-                  <Link to="/faq" className="text-gray-600 hover:text-primary transition-colors">
+                  <Link to="/faq" className="text-muted-foreground hover:text-primary transition-colors">
                     FAQ
                   </Link>
                 </li>
@@ -415,8 +416,8 @@ const Index = () => {
 
             {/* Contact */}
             <div>
-              <h3 className="text-[hsl(222,47%,11%)] font-bold text-lg mb-4">CONTACT</h3>
-              <ul className="space-y-2 text-gray-600">
+              <h3 className="text-foreground font-bold text-lg mb-4">CONTACT</h3>
+              <ul className="space-y-2 text-muted-foreground">
                 <li>123 Health St, Medtown</li>
                 <li>contact@gamelishospital.com</li>
                 <li>(123) 456-7890</li>
@@ -425,18 +426,18 @@ const Index = () => {
         </div>
 
           {/* Bottom Footer */}
-          <div className="border-t border-gray-200 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-gray-600">
+          <div className="border-t pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="text-muted-foreground">
               &copy; 2025 Gameli's Hospital. All rights reserved.
             </p>
             <div className="flex items-center gap-4">
-              <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
+              <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
                 <Facebook className="w-5 h-5" />
               </a>
-              <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
+              <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
                 <Twitter className="w-5 h-5" />
               </a>
-              {/* <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary transition-colors">
+              {/* <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
                 <Github className="w-5 h-5" />
               </a> */}
             </div>

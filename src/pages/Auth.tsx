@@ -598,23 +598,6 @@ const Auth = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="register-role">Register As</Label>
-                    <select
-                      id="register-role"
-                      value={registerData.role}
-                      onChange={(e) => setRegisterData({ ...registerData, role: e.target.value as 'patient' | 'doctor' | 'admin' })}
-                      className="w-full rounded-md border px-3 py-2 bg-transparent"
-                    >
-                      <option value="patient">Patient</option>
-                      {/* <option value="doctor">Doctor</option>
-                      <option value="admin">Admin</option> */}
-                    </select>
-                    {registerData.role !== 'patient' && (
-                      <p className="text-sm text-muted-foreground">Selecting Doctor or Admin will require approval — an administrator will verify your account before elevated access is granted.</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
                     <Label htmlFor="register-email">Email Address</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />

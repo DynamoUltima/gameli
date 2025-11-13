@@ -46,13 +46,26 @@ const BookAppointment = () => {
     paymentMethod: "momo"
   });
 
+  // Calculate age from date of birth
+  const calculateAge = (dateOfBirth: string) => {
+    if (!dateOfBirth) return "";
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age.toString();
+  };
+
   // Prefill personal info from profiles
   useEffect(() => {
     const loadProfile = async () => {
       if (!user?.id) return;
       const { data: profile } = await supabase
         .from("profiles")
-        .select("full_name, phone, email")
+        .select("full_name, phone, email, date_of_birth, gender")
         .eq("id", user.id)
         .maybeSingle();
       if (profile) {
@@ -61,6 +74,8 @@ const BookAppointment = () => {
           name: profile.full_name || prev.name,
           phone: profile.phone || prev.phone,
           email: profile.email || prev.email,
+          age: profile.date_of_birth ? calculateAge(profile.date_of_birth) : prev.age,
+          gender: profile.gender || prev.gender,
         }));
       }
     };
@@ -430,24 +445,35 @@ const BookAppointment = () => {
                     <Label htmlFor="age">Age</Label>
                     <Input 
                       id="age" 
-                      type="number"
-                      placeholder="25"
-                      value={formData.age}
-                      onChange={(e) => setFormData({...formData, age: e.target.value})}
+                      type="text"
+                      placeholder="Age calculated from profile"
+                      value={formData.age ? `${formData.age} years` : ""}
+                      readOnly
+                      disabled
+                      className="bg-muted cursor-not-allowed"
                     />
+                    {!formData.age && (
+                      <p className="text-xs text-muted-foreground">
+                        Update your date of birth in your profile to auto-fill age
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="gender">Gender</Label>
-                    <Select value={formData.gender} onValueChange={(value) => setFormData({...formData, gender: value})}>
-                      <SelectTrigger id="gender">
-                        <SelectValue placeholder="Select gender" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                        {/* <SelectItem value="other">Other</SelectItem> */}
-                      </SelectContent>
-                    </Select>
+                    <Input 
+                      id="gender" 
+                      type="text"
+                      placeholder="Gender from profile"
+                      value={formData.gender ? formData.gender.charAt(0).toUpperCase() + formData.gender.slice(1) : ""}
+                      readOnly
+                      disabled
+                      className="bg-muted cursor-not-allowed"
+                    />
+                    {!formData.gender && (
+                      <p className="text-xs text-muted-foreground">
+                        Update your gender in your profile to auto-fill
+                      </p>
+                    )}
                   </div>
                 </div>
 

@@ -17,6 +17,9 @@ import { useDoctors } from "@/hooks/useDoctors";
 import { AddDoctorDialog } from "@/components/admin/AddDoctorDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from 'uuid';
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { AlertCircle } from "lucide-react";
 import {
   LayoutDashboard,
   Users,
@@ -49,6 +52,8 @@ import {
   DollarSign,
   Star,
   LogOut,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -119,6 +124,14 @@ const AdminDashboard = () => {
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [updatingPatient, setUpdatingPatient] = useState(false);
   const [hospitalCardId, setHospitalCardId] = useState('');
+
+  // Notifications state
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Pagination state for New Requests
+  const [requestsCurrentPage, setRequestsCurrentPage] = useState(1);
+  const requestsPerPage = 6; // 2 rows of 3 cards
   
   // Reports state
   const [reportType, setReportType] = useState<string>('appointments');
@@ -384,6 +397,118 @@ const AdminDashboard = () => {
     fetchPatients();
   }, []);
 
+  // Fetch admin notifications
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const notificationsList: any[] = [];
+        
+        // 1. Get pending appointments (last 7 days)
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const { data: pendingAppointments } = await supabase
+          .from('appointments')
+          .select('id, patient_id, doctor_id, type, scheduled_at, status, created_at')
+          .eq('status', 'pending')
+          .gte('created_at', sevenDaysAgo.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (pendingAppointments) {
+          for (const apt of pendingAppointments) {
+            const { data: patient } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', apt.patient_id)
+              .single();
+
+            notificationsList.push({
+              id: apt.id,
+              type: 'pending',
+              message: `New appointment request from ${patient?.full_name || 'Patient'}`,
+              time: apt.created_at,
+              icon: 'clock'
+            });
+          }
+        }
+
+        // 2. Get recent confirmed appointments (last 24 hours)
+        const oneDayAgo = new Date();
+        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
+        const { data: confirmedAppointments } = await supabase
+          .from('appointments')
+          .select('id, patient_id, status, created_at')
+          .eq('status', 'confirmed')
+          .gte('created_at', oneDayAgo.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        if (confirmedAppointments) {
+          for (const apt of confirmedAppointments) {
+            const { data: patient } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', apt.patient_id)
+              .single();
+
+            notificationsList.push({
+              id: `confirmed-${apt.id}`,
+              type: 'confirmed',
+              message: `Appointment confirmed for ${patient?.full_name || 'Patient'}`,
+              time: apt.created_at,
+              icon: 'check'
+            });
+          }
+        }
+
+        // 3. Get new patient registrations (last 7 days)
+        const { data: newPatients } = await supabase
+          .from('user_roles')
+          .select('user_id, created_at')
+          .eq('role', 'patient')
+          .gte('created_at', sevenDaysAgo.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        if (newPatients) {
+          for (const patient of newPatients) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', patient.user_id)
+              .single();
+
+            notificationsList.push({
+              id: `new-patient-${patient.user_id}`,
+              type: 'new_patient',
+              message: `New patient registered: ${profile?.full_name || 'Unknown'}`,
+              time: patient.created_at,
+              icon: 'user'
+            });
+          }
+        }
+
+        // Sort by time (most recent first) and limit to 15
+        notificationsList.sort((a, b) => 
+          new Date(b.time).getTime() - new Date(a.time).getTime()
+        );
+        
+        setNotifications(notificationsList.slice(0, 15));
+        setUnreadCount(notificationsList.length);
+      } catch (error) {
+        console.error('Error fetching notifications:', error);
+      }
+    };
+
+    fetchNotifications();
+    
+    // Refresh notifications every 2 minutes
+    const interval = setInterval(fetchNotifications, 120000);
+    return () => clearInterval(interval);
+  }, []);
+
   // All doctors are sourced from the database via useDoctors()
 
   const [appointments, setAppointments] = useState<Array<{
@@ -470,6 +595,25 @@ const AdminDashboard = () => {
   const pendingAppointments = useMemo(() => {
     return appointments.filter(a => a.status === 'pending');
   }, [appointments]);
+
+  // Calculate pagination for pending requests
+  const requestsTotalPages = Math.ceil(pendingAppointments.length / requestsPerPage);
+  const requestsIndexOfLast = requestsCurrentPage * requestsPerPage;
+  const requestsIndexOfFirst = requestsIndexOfLast - requestsPerPage;
+  const currentPendingRequests = pendingAppointments.slice(requestsIndexOfFirst, requestsIndexOfLast);
+
+  // Reset requests page when pending appointments change
+  useEffect(() => {
+    setRequestsCurrentPage(1);
+  }, [pendingAppointments.length]);
+
+  const handleRequestsPreviousPage = () => {
+    setRequestsCurrentPage((prev) => Math.max(prev - 1, 1));
+  };
+
+  const handleRequestsNextPage = () => {
+    setRequestsCurrentPage((prev) => Math.min(prev + 1, requestsTotalPages));
+  };
 
   // Calculate confirmed appointments for today
   const confirmedTodayCount = useMemo(() => {
@@ -1323,10 +1467,37 @@ const AdminDashboard = () => {
     );
   };
 
+  // Format relative time for notifications
+  const formatRelativeTime = (timestamp: string) => {
+    const now = new Date();
+    const past = new Date(timestamp);
+    const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    return past.toLocaleDateString();
+  };
+
+  // Get icon for notification type
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case 'pending':
+        return <Clock className="w-5 h-5 text-warning" />;
+      case 'confirmed':
+        return <CheckCircle className="w-5 h-5 text-success" />;
+      case 'new_patient':
+        return <UserPlus className="w-5 h-5 text-primary" />;
+      default:
+        return <Bell className="w-5 h-5 text-muted-foreground" />;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
+      <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col fixed left-0 top-0 h-screen overflow-y-auto">
         <div className="p-6 border-b border-sidebar-border">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
@@ -1334,7 +1505,7 @@ const AdminDashboard = () => {
                 <Hospital className="w-6 h-6 text-primary-foreground" />
               </div>
               <div>
-                <h1 className="font-bold text-sidebar-foreground">Gameli's Hospital</h1>
+                <h1 className="font-bold text-sidebar-foreground">St Gameliel's Hospital</h1>
                 <p className="text-xs text-muted-foreground">Admin Dashboard</p>
               </div>
             </div>
@@ -1424,7 +1595,7 @@ const AdminDashboard = () => {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto ml-64">
         <div className="p-8">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
@@ -1443,9 +1614,78 @@ const AdminDashboard = () => {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="icon">
-                <Bell className="w-4 h-4" />
-              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="icon" className="relative">
+                    <Bell className="w-4 h-4" />
+                    {unreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="end">
+                  <div className="flex items-center justify-between p-4 border-b">
+                    <h3 className="font-semibold">Notifications</h3>
+                    {unreadCount > 0 && (
+                      <Badge variant="secondary">{unreadCount} new</Badge>
+                    )}
+                  </div>
+                  <ScrollArea className="h-[400px]">
+                    {notifications.length === 0 ? (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <Bell className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                        <p>No new notifications</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y">
+                        {notifications.map((notification) => (
+                          <div
+                            key={notification.id}
+                            className="p-4 hover:bg-muted/50 transition-colors cursor-pointer"
+                            onClick={() => {
+                              if (notification.type === 'pending') {
+                                setActiveTab('appointments');
+                              } else if (notification.type === 'new_patient') {
+                                setActiveTab('users');
+                              }
+                            }}
+                          >
+                            <div className="flex gap-3">
+                              <div className="flex-shrink-0 mt-1">
+                                {getNotificationIcon(notification.type)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground">
+                                  {notification.message}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {formatRelativeTime(notification.time)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                  {notifications.length > 0 && (
+                    <div className="p-2 border-t">
+                      <Button 
+                        variant="ghost" 
+                        className="w-full text-sm"
+                        onClick={() => {
+                          setNotifications([]);
+                          setUnreadCount(0);
+                        }}
+                      >
+                        Clear all notifications
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
                {activeTab === "campaigns" && (
                   <div className="flex items-center justify-between w-full">
                     <span>Awareness Campaigns</span>
@@ -1758,14 +1998,23 @@ const AdminDashboard = () => {
               {pendingAppointments.length > 0 && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>New Requests for Confirmation</CardTitle>
-                    <CardDescription>
-                      {pendingAppointments.length} appointment{pendingAppointments.length !== 1 ? 's' : ''} pending approval
-                    </CardDescription>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>New Requests for Confirmation</CardTitle>
+                        <CardDescription>
+                          {pendingAppointments.length} appointment{pendingAppointments.length !== 1 ? 's' : ''} pending approval
+                        </CardDescription>
+                      </div>
+                      {pendingAppointments.length > requestsPerPage && (
+                        <span className="text-sm text-muted-foreground">
+                          Page {requestsCurrentPage} of {requestsTotalPages}
+                        </span>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {pendingAppointments.map((apt) => {
+                      {currentPendingRequests.map((apt) => {
                         const getTypeIconComponent = () => {
                           switch (apt.type) {
                             case 'online':
@@ -1888,6 +2137,32 @@ const AdminDashboard = () => {
                         );
                       })}
                     </div>
+                    
+                    {pendingAppointments.length > requestsPerPage && (
+                      <div className="flex items-center justify-between pt-4 border-t mt-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRequestsPreviousPage}
+                          disabled={requestsCurrentPage === 1}
+                        >
+                          <ChevronLeft className="w-4 h-4 mr-1" />
+                          Previous
+                        </Button>
+                        <span className="text-sm text-muted-foreground">
+                          Showing {requestsIndexOfFirst + 1}-{Math.min(requestsIndexOfLast, pendingAppointments.length)} of {pendingAppointments.length}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRequestsNextPage}
+                          disabled={requestsCurrentPage === requestsTotalPages}
+                        >
+                          Next
+                          <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}

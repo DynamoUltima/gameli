@@ -5,6 +5,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { 
   Calendar, 
   Clock, 
@@ -19,12 +22,14 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Edit
 } from "lucide-react";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useAuth } from "@/hooks/useAuth";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface Notification {
   id: string;
@@ -41,6 +46,23 @@ const PatientDashboard = () => {
   const [loadingAppointments, setLoadingAppointments] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  
+  // Profile data state
+  const [profileData, setProfileData] = useState({
+    phone: "",
+    gender: "",
+    date_of_birth: "",
+    hospital_card_id: ""
+  });
+  
+  // Edit profile dialog state
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    phone: "",
+    gender: "",
+    date_of_birth: ""
+  });
 
   // Format date for display from timestamp
   const formatDate = (timestamp: string) => {
@@ -65,10 +87,19 @@ const PatientDashboard = () => {
       if (!user?.id) return;
       const { data: profile } = await supabase
         .from("profiles")
-        .select("full_name")
+        .select("full_name, phone, gender, date_of_birth, hospital_card_id")
         .eq("id", user.id)
         .maybeSingle();
-      setFullName(profile?.full_name ?? "");
+      
+      if (profile) {
+        setFullName(profile.full_name ?? "");
+        setProfileData({
+          phone: profile.phone ?? "",
+          gender: profile.gender ?? "",
+          date_of_birth: profile.date_of_birth ?? "",
+          hospital_card_id: profile.hospital_card_id ?? ""
+        });
+      }
     };
     loadProfile();
   }, [user?.id]);
@@ -220,6 +251,64 @@ const PatientDashboard = () => {
     return formatDate(timestamp);
   };
 
+  // Calculate age from date of birth
+  const calculateAge = (dateOfBirth: string) => {
+    if (!dateOfBirth) return null;
+    const today = new Date();
+    const birthDate = new Date(dateOfBirth);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  // Open edit profile dialog
+  const handleEditProfile = () => {
+    setEditFormData({
+      phone: profileData.phone,
+      gender: profileData.gender,
+      date_of_birth: profileData.date_of_birth
+    });
+    setEditProfileOpen(true);
+  };
+
+  // Save profile changes
+  const handleSaveProfile = async () => {
+    if (!user?.id) return;
+
+    setEditingProfile(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          phone: editFormData.phone.trim() || null,
+          gender: editFormData.gender || null,
+          date_of_birth: editFormData.date_of_birth || null
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setProfileData(prev => ({
+        ...prev,
+        phone: editFormData.phone,
+        gender: editFormData.gender,
+        date_of_birth: editFormData.date_of_birth
+      }));
+
+      toast.success("Profile updated successfully!");
+      setEditProfileOpen(false);
+    } catch (error: any) {
+      console.error('Error updating profile:', error);
+      toast.error(error.message || "Failed to update profile");
+    } finally {
+      setEditingProfile(false);
+    }
+  };
+
   // Get icon for notification type
   const getNotificationIcon = (type: string) => {
     switch (type) {
@@ -245,7 +334,7 @@ const PatientDashboard = () => {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center">
               <Hospital className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="text-xl font-bold text-foreground">Gameli's Hospital</span>
+            <span className="text-xl font-bold text-foreground">St Gameliel's Hospital</span>
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitcher />
@@ -472,8 +561,11 @@ const PatientDashboard = () => {
           {/* Sidebar */}
           <div className="space-y-6">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <CardTitle className="text-lg">Patient Profile</CardTitle>
+                <Button variant="ghost" size="icon" onClick={handleEditProfile}>
+                  <Edit className="w-4 h-4" />
+                </Button>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="text-center pb-4">
@@ -481,20 +573,24 @@ const PatientDashboard = () => {
                     <AvatarFallback className="bg-primary text-primary-foreground text-2xl">{initials || "PT"}</AvatarFallback>
                   </Avatar>
                   <h3 className="font-semibold">{fullName || "Patient"}</h3>
-                  <p className="text-sm text-muted-foreground">Patient ID: #PT-2025-0042</p>
+                  {profileData.hospital_card_id && (
+                    <p className="text-sm text-muted-foreground">Card ID: {profileData.hospital_card_id}</p>
+                  )}
                 </div>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Age:</span>
-                    <span className="font-medium">32 years</span>
+                    <span className="font-medium">
+                      {profileData.date_of_birth ? `${calculateAge(profileData.date_of_birth)} years` : "Not set"}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Gender:</span>
-                    <span className="font-medium">Female</span>
+                    <span className="font-medium capitalize">{profileData.gender || "Not set"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Blood Type:</span>
-                    <span className="font-medium">O+</span>
+                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="font-medium">{profileData.phone || "Not set"}</span>
                   </div>
                 </div>
               </CardContent>
@@ -527,8 +623,76 @@ const PatientDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Profile</DialogTitle>
+            <DialogDescription>
+              Update your personal information
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-phone">Phone Number</Label>
+              <Input
+                id="edit-phone"
+                placeholder="+233 XX XXX XXXX"
+                value={editFormData.phone}
+                onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-gender">Gender</Label>
+              <select
+                id="edit-gender"
+                value={editFormData.gender}
+                onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
+                className="w-full rounded-md border px-3 py-2 bg-transparent"
+              >
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-dob">Date of Birth</Label>
+              <Input
+                id="edit-dob"
+                type="date"
+                value={editFormData.date_of_birth}
+                onChange={(e) => setEditFormData({ ...editFormData, date_of_birth: e.target.value })}
+                max={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditProfileOpen(false)}
+              disabled={editingProfile}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveProfile} disabled={editingProfile}>
+              {editingProfile ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 export default PatientDashboard;
+

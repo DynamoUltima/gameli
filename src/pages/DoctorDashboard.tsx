@@ -34,6 +34,14 @@ const DoctorDashboard = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  
+  // Pagination state for Today's Schedule
+  const [currentPage, setCurrentPage] = useState(1);
+  const appointmentsPerPage = 5;
+  
+  // Pagination state for Calendar Appointments
+  const [calendarCurrentPage, setCalendarCurrentPage] = useState(1);
+  const calendarAppointmentsPerPage = 5;
 
   useEffect(() => {
     const loadDoctor = async () => {
@@ -314,6 +322,25 @@ const DoctorDashboard = () => {
     }
   };
 
+  // Calculate pagination
+  const totalPages = Math.ceil(todayAppointments.length / appointmentsPerPage);
+  const indexOfLastAppointment = currentPage * appointmentsPerPage;
+  const indexOfFirstAppointment = indexOfLastAppointment - appointmentsPerPage;
+  const currentAppointments = todayAppointments.slice(indexOfFirstAppointment, indexOfLastAppointment);
+
+  // Reset to page 1 when appointments change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [todayAppointments.length]);
+
+  const handlePreviousPage = () => {
+    setCurrentPage((prev) => Math.max(prev - 1, 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+  };
+
   const initials = useMemo(() => {
     if (!fullName) return "";
     const parts = fullName.trim().split(/\s+/);
@@ -415,6 +442,25 @@ const DoctorDashboard = () => {
 
   const { daysInMonth, startingDayOfWeek, year, month } = getDaysInMonth(currentMonth);
   const selectedDateAppointments = getAppointmentsForDate(selectedDate);
+  
+  // Calculate pagination for calendar appointments
+  const calendarTotalPages = Math.ceil(selectedDateAppointments.length / calendarAppointmentsPerPage);
+  const calendarIndexOfLastAppointment = calendarCurrentPage * calendarAppointmentsPerPage;
+  const calendarIndexOfFirstAppointment = calendarIndexOfLastAppointment - calendarAppointmentsPerPage;
+  const currentCalendarAppointments = selectedDateAppointments.slice(calendarIndexOfFirstAppointment, calendarIndexOfLastAppointment);
+
+  // Reset calendar page when selected date changes
+  useEffect(() => {
+    setCalendarCurrentPage(1);
+  }, [selectedDate, selectedDateAppointments.length]);
+
+  const handleCalendarPreviousPage = () => {
+    setCalendarCurrentPage((prev) => Math.max(prev - 1, 1));
+  };
+
+  const handleCalendarNextPage = () => {
+    setCalendarCurrentPage((prev) => Math.min(prev + 1, calendarTotalPages));
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10">
@@ -425,7 +471,7 @@ const DoctorDashboard = () => {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center">
               <Hospital className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="text-xl font-bold text-foreground">Gameli's Hospital</span>
+            <span className="text-xl font-bold text-foreground">St Gameliel's Hospital</span>
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitcher />
@@ -661,17 +707,25 @@ const DoctorDashboard = () => {
                       <h4 className="font-semibold">
                         {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                       </h4>
-                      {selectedDateAppointments.length > 0 && (
-                        <span className="text-sm text-muted-foreground">
-                          {selectedDateAppointments.length} appointment{selectedDateAppointments.length !== 1 ? 's' : ''}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-3">
+                        {selectedDateAppointments.length > 0 && (
+                          <span className="text-sm text-muted-foreground">
+                            {selectedDateAppointments.length} appointment{selectedDateAppointments.length !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {selectedDateAppointments.length > calendarAppointmentsPerPage && (
+                          <span className="text-xs text-muted-foreground">
+                            Page {calendarCurrentPage} of {calendarTotalPages}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {selectedDateAppointments.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-4">No appointments scheduled</p>
                     ) : (
-                      <div className="space-y-2">
-                        {selectedDateAppointments.map((apt: any) => {
+                      <>
+                        <div className="space-y-2">
+                          {currentCalendarAppointments.map((apt: any) => {
                           const scheduledDate = new Date(apt.scheduled_at);
                           // Determine status badge variant
                           const getStatusVariant = (status: string) => {
@@ -755,7 +809,34 @@ const DoctorDashboard = () => {
                             </div>
                           );
                         })}
-                      </div>
+                        </div>
+                        
+                        {selectedDateAppointments.length > calendarAppointmentsPerPage && (
+                          <div className="flex items-center justify-between pt-4 border-t mt-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCalendarPreviousPage}
+                              disabled={calendarCurrentPage === 1}
+                            >
+                              <ChevronLeft className="w-4 h-4 mr-1" />
+                              Previous
+                            </Button>
+                            <span className="text-sm text-muted-foreground">
+                              Showing {calendarIndexOfFirstAppointment + 1}-{Math.min(calendarIndexOfLastAppointment, selectedDateAppointments.length)} of {selectedDateAppointments.length}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCalendarNextPage}
+                              disabled={calendarCurrentPage === calendarTotalPages}
+                            >
+                              Next
+                              <ChevronRight className="w-4 h-4 ml-1" />
+                            </Button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -764,42 +845,88 @@ const DoctorDashboard = () => {
 
             <Card>
               <CardHeader>
-                <CardTitle>Today's Schedule</CardTitle>
-                <CardDescription>Your appointments for today</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Today's Schedule</CardTitle>
+                    <CardDescription>Your appointments for today</CardDescription>
+                  </div>
+                  {todayAppointments.length > appointmentsPerPage && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {todayAppointments.map((apt) => (
-                    <div key={apt.id} className="p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div className="flex gap-4 items-center flex-1">
-                          <Avatar>
-                            <AvatarFallback className="bg-primary text-primary-foreground">
-                              {apt.patient.split(' ').map(n => n[0]).join('')}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1">
-                            <h4 className="font-semibold">{apt.patient}</h4>
-                            <div className="flex items-center gap-4 mt-1">
-                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                <Clock className="w-4 h-4" />
-                                {apt.time}
+                  {todayAppointments.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <CalendarIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                      <p>No appointments scheduled for today</p>
+                    </div>
+                  ) : (
+                    <>
+                      {currentAppointments.map((apt) => (
+                        <div key={apt.id} className="p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <div className="flex gap-4 items-center flex-1">
+                              <Avatar>
+                                <AvatarFallback className="bg-primary text-primary-foreground">
+                                  {apt.patient.split(' ').map(n => n[0]).join('')}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1">
+                                <h4 className="font-semibold">{apt.patient}</h4>
+                                <div className="flex items-center gap-4 mt-1">
+                                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                    <Clock className="w-4 h-4" />
+                                    {apt.time}
+                                  </div>
+                                  <Badge variant={apt.type === "online" ? "default" : "secondary"}>
+                                    {apt.type === "online" ? "Online" : "In-Person"}
+                                  </Badge>
+                                </div>
                               </div>
-                              <Badge variant={apt.type === "online" ? "default" : "secondary"}>
-                                {apt.type === "online" ? "Online" : "In-Person"}
-                              </Badge>
                             </div>
+                            {apt.type === "online" && (
+                              <Button size="sm">
+                                <Video className="w-4 h-4 mr-2" />
+                                Start
+                              </Button>
+                            )}
                           </div>
                         </div>
-                        {apt.type === "online" && (
-                          <Button size="sm">
-                            <Video className="w-4 h-4 mr-2" />
-                            Start
+                      ))}
+                      
+                      {todayAppointments.length > appointmentsPerPage && (
+                        <div className="flex items-center justify-between pt-4 border-t">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handlePreviousPage}
+                            disabled={currentPage === 1}
+                          >
+                            <ChevronLeft className="w-4 h-4 mr-1" />
+                            Previous
                           </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                          <span className="text-sm text-muted-foreground">
+                            Showing {indexOfFirstAppointment + 1}-{Math.min(indexOfLastAppointment, todayAppointments.length)} of {todayAppointments.length}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleNextPage}
+                            disabled={currentPage === totalPages}
+                          >
+                            Next
+                            <ChevronRight className="w-4 h-4 ml-1" />
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>

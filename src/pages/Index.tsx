@@ -168,7 +168,7 @@ const Index = () => {
                   <div className="p-1">
                     <Card className="border-0 overflow-hidden">
                       <div 
-                        className="relative w-full aspect-video md:aspect-[3/1] bg-contain bg-fill bg-muted"
+                        className="relative w-full aspect-video md:aspect-[3/1] bg-cover bg-fill bg-muted"
                         style={{ backgroundImage: `url(${slide.image})` }}
                       >
                         <div className={`absolute inset-0 ${slide.overlay}`}></div>

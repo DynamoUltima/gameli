@@ -71,7 +71,7 @@ const Index = () => {
   }));
 
   // Combine campaigns with default slides (campaigns first)
-  const bannerSlides = loadingCampaigns ? defaultBannerSlides : [...campaignSlides, ...defaultBannerSlides];
+  const bannerSlides = loadingCampaigns ? defaultBannerSlides : [...campaignSlides];
 
   return (
     <div className="min-h-screen bg-background">

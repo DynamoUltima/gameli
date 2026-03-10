@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Specialty } from '@/hooks/useDoctors';
 
 const formSchema = z.object({
@@ -39,10 +40,8 @@ const formSchema = z.object({
   other_name: z.string().optional(),
   phone: z.string().min(10, { message: 'Phone number must be at least 10 characters' }),
   gender: z.string().optional(),
-  specialty_id: z.string().min(1, { message: 'Please select a specialty' }),
-  license_number: z.string().min(1, { message: 'License number is required' }),
+  specialty_ids: z.array(z.string()).min(1, { message: 'Please select at least one specialty' }),
   years_of_experience: z.string().min(1, { message: 'Years of experience is required' }),
-  consultation_fee: z.string().min(1, { message: 'Consultation fee is required' }),
 });
 
 interface AddDoctorDialogProps {
@@ -63,11 +62,11 @@ export const AddDoctorDialog = ({
 
   // Default specialties to show in the UI so admins can pick common fields
   const defaultSpecialties: Specialty[] = [
-    { id: 'Fertility', name: 'Fertility', description: 'Reproductive health and fertility treatments', created_at: '' },
-    { id: 'Gynaecology', name: 'Gynaecology', description: "Women's reproductive health", created_at: '' },
-    { id: 'Obstetrics', name: 'Obstetrics', description: 'Pregnancy and childbirth care', created_at: '' },
-    { id: 'Paediatrics', name: 'Paediatrics', description: 'Child healthcare', created_at: '' },
-    { id: 'General Practice', name: 'General Practice', description: 'Primary healthcare services', created_at: '' },
+    { id: 'Fertility', name: 'Fertility', description: 'Reproductive health and fertility treatments', cost: null, created_at: '' },
+    { id: 'Gynaecology', name: 'Gynaecology', description: "Women's reproductive health", cost: null, created_at: '' },
+    { id: 'Obstetrics', name: 'Obstetrics', description: 'Pregnancy and childbirth care', cost: null, created_at: '' },
+    { id: 'Paediatrics', name: 'Paediatrics', description: 'Child healthcare', cost: null, created_at: '' },
+    { id: 'General Practice', name: 'General Practice', description: 'Primary healthcare services', cost: null, created_at: '' },
   ];
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -80,10 +79,8 @@ export const AddDoctorDialog = ({
       other_name: '',
       phone: '',
       gender: '',
-      specialty_id: '',
-      license_number: '',
+      specialty_ids: [],
       years_of_experience: '',
-      consultation_fee: '',
     },
   });
 
@@ -106,7 +103,7 @@ export const AddDoctorDialog = ({
       });
 
 
-      console.log({'authdata':authData})
+      console.log({ 'authdata': authData })
 
       if (authError) throw authError;
       if (!authData.user) throw new Error('Failed to create user');
@@ -119,58 +116,42 @@ export const AddDoctorDialog = ({
 
       if (roleError) throw roleError;
 
-      // Ensure specialty exists in DB. If the selected specialty id is not
-      // one of the fetched specialties (i.e. we're using a default name),
-      // upsert by name and use the returned id.
-      let specialtyId = values.specialty_id;
+      // Ensure specialty exists in DB.
+      let resolvedSpecialtyIds: string[] = [];
 
-      const found = specialties.find((s) => s.id === specialtyId);
-      if (!found) {
-        // treat specialtyId as a name and upsert
-        try {
-          const { data: specData, error: specError } = await supabase
-            .from('specialties')
-            .upsert({ name: specialtyId.trim(), description: null }, { onConflict: 'name' })
-            .select('id')
-            .limit(1)
-            .maybeSingle();
+      for (const specId of values.specialty_ids) {
+        const found = specialties.find((s) => s.id === specId);
+        if (!found) {
+          // treat specId as a name and upsert
+          try {
+            const { data: specData, error: specError } = await supabase
+              .from('specialties')
+              .upsert({ name: specId.trim(), description: null }, { onConflict: 'name' })
+              .select('id')
+              .limit(1)
+              .maybeSingle();
 
-          if (specError) throw specError;
-          if (!specData || !specData.id) throw new Error('Failed to create/find specialty');
-          specialtyId = specData.id;
-        } catch (err: any) {
-          console.error('Specialty upsert error:', err);
-
-          // If the specialties table is missing in the database, surface a
-          // clear message and stop the flow (PGRST205 comes from PostgREST)
-          if (err?.code === 'PGRST205' || String(err?.message).includes("Could not find the table 'public.specialties'")) {
-            toast({
-              title: 'Database table missing',
-              description:
-                "The 'specialties' table is not present in your database. Run the project's migrations or run the SQL seed in the Supabase SQL editor (check README).",
-              variant: 'destructive',
-            });
-            // stop the submit flow gracefully
-            return;
+            if (specError) throw specError;
+            if (specData && specData.id) {
+              resolvedSpecialtyIds.push(specData.id);
+            }
+          } catch (err: any) {
+            console.error('Specialty upsert error:', err);
+            throw new Error(err?.message || 'Failed to create specialty. Check RLS and permissions.');
           }
-
-          // Other errors: rethrow so outer catch will handle and show toast
-          throw new Error(err?.message || 'Failed to create specialty. Check RLS and permissions.');
+        } else {
+          resolvedSpecialtyIds.push(specId);
         }
       }
 
       // Create doctor record
-      const { error: doctorError } = await supabase.from('doctors').insert({
+      const { data: doctorData, error: doctorError } = await supabase.from('doctors').insert({
         user_id: authData.user.id,
-        specialty_id: specialtyId,
-        license_number: values.license_number,
         years_of_experience: parseInt(values.years_of_experience),
-        consultation_fee: parseFloat(values.consultation_fee),
         available: true,
-      });
+      }).select('id').single();
 
       if (doctorError) {
-        // Surface missing table error with a clear action
         if (
           (doctorError as any)?.code === 'PGRST205' ||
           String((doctorError as any)?.message).includes("Could not find the table 'public.doctors'")
@@ -186,8 +167,21 @@ export const AddDoctorDialog = ({
         throw doctorError;
       }
 
-      console.log({'values':values})
-      console.log({'doctor':doctorError})
+      const doctorId = doctorData?.id;
+
+      if (doctorId && resolvedSpecialtyIds.length > 0) {
+        // Insert into junction table
+        const { error: junctionError } = await supabase.from('doctor_specialties').insert(
+          resolvedSpecialtyIds.map(sId => ({
+            doctor_id: doctorId,
+            specialty_id: sId
+          }))
+        );
+        if (junctionError) throw junctionError;
+      }
+
+      console.log({ 'values': values })
+      console.log({ 'doctor': doctorError })
 
       toast({
         title: 'Success',
@@ -198,7 +192,7 @@ export const AddDoctorDialog = ({
       onOpenChange(false);
       onSuccess();
     } catch (error: any) {
-      console.log({'error':error})
+      console.log({ 'error': error })
       toast({
         title: 'Error',
         description: error.message,
@@ -233,7 +227,7 @@ export const AddDoctorDialog = ({
                 </FormItem>
               )}
             />
-            
+
             <div className="grid grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -248,7 +242,7 @@ export const AddDoctorDialog = ({
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={form.control}
                 name="last_name"
@@ -263,7 +257,7 @@ export const AddDoctorDialog = ({
                 )}
               />
             </div>
-            
+
             <FormField
               control={form.control}
               name="email"
@@ -303,7 +297,7 @@ export const AddDoctorDialog = ({
                 </FormItem>
               )}
             />
-            
+
             <FormField
               control={form.control}
               name="gender"
@@ -327,40 +321,53 @@ export const AddDoctorDialog = ({
                 </FormItem>
               )}
             />
-            
+
             <FormField
               control={form.control}
-              name="specialty_id"
-              render={({ field }) => (
+              name="specialty_ids"
+              render={() => (
                 <FormItem>
-                  <FormLabel>Specialty</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select specialty" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {(specialties && specialties.length > 0 ? specialties : defaultSpecialties).map((specialty) => (
-                        <SelectItem key={specialty.id} value={specialty.id}>
-                          {specialty.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="license_number"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>License Number</FormLabel>
-                  <FormControl>
-                    <Input placeholder="MD12345" {...field} />
-                  </FormControl>
+                  <div className="mb-4">
+                    <FormLabel className="text-base">Specialties</FormLabel>
+                    <DialogDescription>
+                      Select all specialties that apply to this doctor.
+                    </DialogDescription>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 border rounded-md p-4 max-h-48 overflow-y-auto">
+                    {(specialties && specialties.length > 0 ? specialties : defaultSpecialties).map((specialty) => (
+                      <FormField
+                        key={specialty.id}
+                        control={form.control}
+                        name="specialty_ids"
+                        render={({ field }) => {
+                          return (
+                            <FormItem
+                              key={specialty.id}
+                              className="flex flex-row items-start space-x-3 space-y-0"
+                            >
+                              <FormControl>
+                                <Checkbox
+                                  checked={field.value?.includes(specialty.id)}
+                                  onCheckedChange={(checked) => {
+                                    return checked
+                                      ? field.onChange([...(field.value || []), specialty.id])
+                                      : field.onChange(
+                                        field.value?.filter(
+                                          (value) => value !== specialty.id
+                                        )
+                                      )
+                                  }}
+                                />
+                              </FormControl>
+                              <FormLabel className="font-normal cursor-pointer text-sm">
+                                {specialty.name}
+                              </FormLabel>
+                            </FormItem>
+                          )
+                        }}
+                      />
+                    ))}
+                  </div>
                   <FormMessage />
                 </FormItem>
               )}
@@ -373,19 +380,6 @@ export const AddDoctorDialog = ({
                   <FormLabel>Years of Experience</FormLabel>
                   <FormControl>
                     <Input type="number" placeholder="5" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="consultation_fee"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Consultation Fee (GHS)</FormLabel>
-                  <FormControl>
-                    <Input type="number" step="0.01" placeholder="45.00" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useDoctorSchedules } from "@/hooks/useDoctorSchedules";
+import { useDoctors } from "@/hooks/useDoctors";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,16 +21,17 @@ const BookAppointment = () => {
   const { type } = useParams<{ type: string }>();
   const navigate = useNavigate();
   const { user, loading } = useAuth(true); // Require authentication
-  
+
   // ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS
   const [step, setStep] = useState(1);
   const [selectedDate, setSelectedDate] = useState<Date>();
   const [selectedTime, setSelectedTime] = useState<string>(""); // ISO string
-  const [specialties, setSpecialties] = useState<Array<{ id: string; name: string }>>([]);
-  const [doctorsForClinic, setDoctorsForClinic] = useState<Array<{ id: string; full_name: string }>>([]);
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
-  
+
+  // Use the doctors hook for data
+  const { doctors, specialties, loading: doctorsLoading } = useDoctors();
+
   // Initialize the doctor schedules hook
   const { getAvailableSlots, checkAvailability } = useDoctorSchedules();
   const [formData, setFormData] = useState({
@@ -79,37 +81,18 @@ const BookAppointment = () => {
         }));
       }
     };
-    const loadSpecialties = async () => {
-      const { data } = await supabase
-        .from("specialties")
-        .select("id, name")
-        .order("name");
-      setSpecialties((data || []).map(s => ({ id: s.id, name: s.name })));
-    };
     loadProfile();
-    loadSpecialties();
   }, [user?.id]);
 
-  useEffect(() => {
-    const loadDoctorsByClinic = async () => {
-      setDoctorsForClinic([]);
-      if (!formData.clinic) return;
-      // clinic now holds specialty_id
-      const { data: doctors } = await supabase
-        .from("doctors")
-        .select("user_id")
-        .eq("specialty_id", formData.clinic);
-      const doctorUserIds = (doctors || []).map(d => d.user_id);
-      if (doctorUserIds.length === 0) return;
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", doctorUserIds);
-      setDoctorsForClinic((profiles || []).map(p => ({ id: p.id, full_name: p.full_name })));
-    };
-    loadDoctorsByClinic();
-    console.log({'type':type})
-  }, [formData.clinic]);
+  const doctorsForClinic = useMemo(() => {
+    if (!formData.clinic) return [];
+    return doctors
+      .filter(doc => doc.specialties?.some(s => s.id === formData.clinic) && doc.available)
+      .map(doc => ({
+        id: doc.id,
+        full_name: doc.profiles?.full_name || "Unknown Doctor"
+      }));
+  }, [formData.clinic, doctors]);
 
   useEffect(() => {
     const loadAvailableSlots = async () => {
@@ -125,7 +108,7 @@ const BookAppointment = () => {
         const slots = await getAvailableSlots(formData.doctor, selectedDate);
         console.log('Received slots:', slots);
         setAvailableSlots(slots);
-        
+
         // Auto-select the first available slot if none selected
         if (slots.length > 0) {
           // Only auto-select if no time is currently selected
@@ -160,23 +143,23 @@ const BookAppointment = () => {
       setSelectedTime("");
       return;
     }
-    
+
     // Normalize the date to midnight to avoid timezone issues
     const normalizedDate = new Date(date);
     normalizedDate.setHours(12, 0, 0, 0); // Set to noon to avoid timezone shifts
-    
+
     // If selecting today's date, check if there are any slots left
     if (isToday(normalizedDate)) {
       const now = new Date();
       const currentHour = now.getHours();
-      
+
       // If it's late in the day (after 4 PM), show info but still allow selection
       // The slot filtering will handle removing past times
       if (currentHour >= 16) {
         toast.info('Limited slots available for today. Past times will be automatically filtered.');
       }
     }
-    
+
     // Set the normalized date
     setSelectedDate(normalizedDate);
     setSelectedTime(""); // Reset time when date changes
@@ -249,7 +232,7 @@ const BookAppointment = () => {
         scheduledAt = selectedTime;
       }
 
-      console.log({'-------type---':type})
+      console.log({ '-------type---': type })
 
       // Resolve doctor_id if provided (doctor select now returns profile id/user id)
       const doctorId: string | null = formData.doctor || null;
@@ -266,45 +249,15 @@ const BookAppointment = () => {
           scheduled_at: scheduledAt ?? new Date().toISOString(),
           symptoms: formData.symptoms || null,
           location: formData.location || null,
-          status: type === "online" ? "pending" : "pending",
-          payment_status: type === "online" ? "unpaid" : "unpaid",
+          status: type === "hospital" ? "pending" : "confirmed",
+          payment_status: "unpaid",
         })
         .select("id, doctor_id, scheduled_at")
         .maybeSingle();
 
       if (apptErr) throw apptErr;
-   console.log({
-          homeVisitDebug: {
-            patient_id: user?.id,
-            doctor_id: doctorId,
-            clinic: (specialties.find(s => s.id === formData.clinic)?.name) || null,
-            specialty_id: formData.clinic || null,
-            type: type,
-            scheduled_at: scheduledAt ?? new Date().toISOString(),
-            symptoms: formData.symptoms || null,
-            location: formData.location || null,
-            patientType: formData.patientType,
-            paymentMethod: formData.paymentMethod,
-            name: formData.name,
-            phone: formData.phone,
-            email: formData.email,
-          },
-          rawFormData: formData,
-        });
-      console.log({'appointment':appt})
-      console.log({'appointmenttErr':apptErr})
-
-      // Schedule entry is auto-created in DB via trigger
-
-      if (type === "online") {
-        navigate(`/payment?type=online&amount=${currentType.price}&appointmentId=${(appt as any)?.id ?? ""}`);
-      } else {
-
-        console.log({'formData home visit':formData})
-
-        const { data: appt, error: apptErr } = await supabase
-        .from("appointments" as any)
-        .insert({
+      console.log({
+        homeVisitDebug: {
           patient_id: user?.id,
           doctor_id: doctorId,
           clinic: (specialties.find(s => s.id === formData.clinic)?.name) || null,
@@ -313,21 +266,22 @@ const BookAppointment = () => {
           scheduled_at: scheduledAt ?? new Date().toISOString(),
           symptoms: formData.symptoms || null,
           location: formData.location || null,
-          status: type === "home" ? "pending" : "pending",
-          payment_status: type === "home" ? "unpaid" : "unpaid",
-        })
-        .select("id, doctor_id, scheduled_at")
-        .maybeSingle();
+          patientType: formData.patientType,
+          paymentMethod: formData.paymentMethod,
+          name: formData.name,
+          phone: formData.phone,
+          email: formData.email,
+        },
+        rawFormData: formData,
+      });
 
-        
+      // Schedule entry is auto-created in DB via trigger
 
-       console.log({'formData home visit':formData})
-
-        console.log({'appt home visit':appt})
-        console.log({'apptErr home visit':apptErr})
-      
-
-
+      if (type === "online") {
+        const selectedSpecialty = specialties.find(s => s.id === formData.clinic);
+        const amountToPay = selectedSpecialty?.cost || currentType.price;
+        navigate(`/payment?type=online&amount=${amountToPay}&appointmentId=${(appt as any)?.id ?? ""}`);
+      } else {
         toast.success("Appointment request submitted! Our admin will contact you.");
         // setTimeout(() => navigate("/"), 1200);
       }
@@ -337,6 +291,9 @@ const BookAppointment = () => {
   };
 
   const steps = type === "online" ? 4 : 3;
+
+  const selectedSpecialtyObj = specialties.find(s => s.id === formData.clinic);
+  const displayAmount = selectedSpecialtyObj?.cost || currentType.price;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10 py-8">
@@ -349,7 +306,7 @@ const BookAppointment = () => {
             </Button>
             <ThemeSwitcher />
           </div>
-          
+
           <div className="flex items-center gap-4">
             {Icon && (
               <div className={`w-16 h-16 rounded-2xl bg-${currentType.color}/10 flex items-center justify-center`}>
@@ -368,11 +325,10 @@ const BookAppointment = () => {
           {Array.from({ length: steps }).map((_, index) => (
             <div key={index} className="flex items-center flex-1">
               <div className="flex flex-col items-center flex-1">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-all ${
-                  step > index + 1 ? "bg-success text-success-foreground" :
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-all ${step > index + 1 ? "bg-success text-success-foreground" :
                   step === index + 1 ? "bg-primary text-primary-foreground" :
-                  "bg-muted text-muted-foreground"
-                }`}>
+                    "bg-muted text-muted-foreground"
+                  }`}>
                   {step > index + 1 ? <Check className="w-5 h-5" /> : index + 1}
                 </div>
                 <span className="text-xs mt-2 text-muted-foreground">
@@ -411,40 +367,40 @@ const BookAppointment = () => {
                 <div className="grid md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name *</Label>
-                    <Input 
-                      id="name" 
+                    <Input
+                      id="name"
                       placeholder="John Doe"
                       value={formData.name}
-                      onChange={(e) => setFormData({...formData, name: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">Phone Number *</Label>
-                    <Input 
-                      id="phone" 
+                    <Input
+                      id="phone"
                       placeholder="+233 XX XXX XXXX"
                       value={formData.phone}
-                      onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address *</Label>
-                  <Input 
-                    id="email" 
+                  <Input
+                    id="email"
                     type="email"
                     placeholder="john.doe@example.com"
                     value={formData.email}
-                    onChange={(e) => setFormData({...formData, email: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   />
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="age">Age</Label>
-                    <Input 
-                      id="age" 
+                    <Input
+                      id="age"
                       type="text"
                       placeholder="Age calculated from profile"
                       value={formData.age ? `${formData.age} years` : ""}
@@ -460,8 +416,8 @@ const BookAppointment = () => {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="gender">Gender</Label>
-                    <Input 
-                      id="gender" 
+                    <Input
+                      id="gender"
                       type="text"
                       placeholder="Gender from profile"
                       value={formData.gender ? formData.gender.charAt(0).toUpperCase() + formData.gender.slice(1) : ""}
@@ -500,7 +456,7 @@ const BookAppointment = () => {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="clinic">Select Clinic *</Label>
-                  <Select value={formData.clinic} onValueChange={(value) => setFormData({...formData, clinic: value, doctor: ""})}>
+                  <Select value={formData.clinic} onValueChange={(value) => setFormData({ ...formData, clinic: value, doctor: "" })}>
                     <SelectTrigger id="clinic">
                       <SelectValue placeholder="Choose a clinic" />
                     </SelectTrigger>
@@ -525,7 +481,7 @@ const BookAppointment = () => {
                   </Label>
                   <Select
                     value={formData.doctor}
-                    onValueChange={(value) => setFormData({...formData, doctor: value})}
+                    onValueChange={(value) => setFormData({ ...formData, doctor: value })}
                     disabled={!formData.clinic}
                   >
                     <SelectTrigger id="doctor">
@@ -553,23 +509,23 @@ const BookAppointment = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="symptoms">Symptoms / Reason for Visit *</Label>
-                  <Textarea 
-                    id="symptoms" 
+                  <Textarea
+                    id="symptoms"
                     placeholder="Please describe your symptoms or reason for consultation..."
                     className="min-h-32"
                     value={formData.symptoms}
-                    onChange={(e) => setFormData({...formData, symptoms: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, symptoms: e.target.value })}
                   />
                 </div>
 
                 {type === "home" && (
                   <div className="space-y-2">
                     <Label htmlFor="location">Home Address *</Label>
-                    <Textarea 
-                      id="location" 
+                    <Textarea
+                      id="location"
                       placeholder="Enter your complete address for home visit..."
                       value={formData.location}
-                      onChange={(e) => setFormData({...formData, location: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                     />
                   </div>
                 )}
@@ -591,7 +547,7 @@ const BookAppointment = () => {
                 {selectedDate && (
                   <div className="text-center p-4 bg-primary/10 rounded-lg">
                     <p className="text-sm text-muted-foreground">Selected Date</p>
-                    <p className="font-semibold text-lg">{selectedDate.toLocaleDateString()}</p>
+                    <p className="font-semibold text-lg">{selectedDate.toLocaleDateString('en-US')}</p>
                   </div>
                 )}
                 <div className="mt-4">
@@ -670,7 +626,7 @@ const BookAppointment = () => {
             {/* Step 4: Payment Method (Online only) */}
             {step === 4 && (
               <div className="space-y-4">
-                <RadioGroup value={formData.paymentMethod} onValueChange={(value) => setFormData({...formData, paymentMethod: value})}>
+                <RadioGroup value={formData.paymentMethod} onValueChange={(value) => setFormData({ ...formData, paymentMethod: value })}>
                   <div className="flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer hover:border-primary transition-colors">
                     <RadioGroupItem value="momo" id="momo" />
                     <Label htmlFor="momo" className="flex items-center gap-3 flex-1 cursor-pointer">
@@ -700,12 +656,12 @@ const BookAppointment = () => {
 
                 <div className="p-4 bg-primary/10 rounded-lg space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Consultation Fee:</span>
-                    <span className="font-medium">45 GHS</span>
+                    <span className="text-muted-foreground">Amount:</span>
+                    <span className="font-medium">{displayAmount} GHS</span>
                   </div>
                   <div className="flex justify-between text-lg font-bold border-t pt-2">
                     <span>Total:</span>
-                    <span className="text-primary">45 GHS</span>
+                    <span className="text-primary">{displayAmount} GHS</span>
                   </div>
                 </div>
               </div>
@@ -719,7 +675,7 @@ const BookAppointment = () => {
                   Back
                 </Button>
               )}
-              
+
               {step < steps ? (
                 <Button onClick={handleNext} className="flex-1">
                   Next

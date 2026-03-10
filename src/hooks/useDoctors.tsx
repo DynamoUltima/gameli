@@ -6,6 +6,7 @@ export interface Specialty {
   id: string;
   name: string;
   description: string | null;
+  cost: number | null;
   created_at: string;
 }
 
@@ -13,9 +14,7 @@ export interface Doctor {
   id: string;
   user_id: string;
   specialty_id: string | null;
-  license_number: string | null;
   years_of_experience: number | null;
-  consultation_fee: number | null;
   available: boolean;
   created_at: string;
   updated_at: string;
@@ -24,7 +23,7 @@ export interface Doctor {
     email: string;
     phone: string;
   };
-  specialties?: Specialty;
+  specialties?: Specialty[];
 }
 
 export const useDoctors = () => {
@@ -51,11 +50,14 @@ export const useDoctors = () => {
             .eq('id', doctor.user_id)
             .maybeSingle();
 
-          const { data: specialtyData } = await supabase
-            .from('specialties')
-            .select('id, name, description, created_at')
-            .eq('id', doctor.specialty_id)
-            .maybeSingle();
+          const { data: doctorSpecialtiesData } = await supabase
+            .from('doctor_specialties')
+            .select('*, specialties(*)')
+            .eq('doctor_id', doctor.id);
+
+          const specialtyData = doctorSpecialtiesData
+            ?.map((ds: any) => ds.specialties)
+            .filter(Boolean) || [];
 
           return {
             ...doctor,

@@ -1,451 +1,90 @@
-import { Link, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Video, Hospital, Home, Heart, Headphones, Users, DollarSign, Facebook, Twitter, Github } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
-import { useUserRole } from "@/hooks/useUserRole";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
-import { supabase } from "@/integrations/supabase/client";
-import { useEffect, useState } from "react";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import React, { useState, useEffect } from 'react';
+import { LandingHero } from '@/components/landing/LandingHero';
+import { LandingServices } from '@/components/landing/LandingServices';
+import { LandingAbout } from '@/components/landing/LandingAbout';
+import { LandingConsultation } from '@/components/landing/LandingConsultation';
+import { LandingFooter } from '@/components/landing/LandingFooter';
+import { LandingContactModal } from '@/components/landing/LandingContactModal';
+import { RefreshCw } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { useUserRole } from '@/hooks/useUserRole';
+import { useNavigate } from 'react-router-dom';
 
-const Index = () => {
-  const { user, loading } = useAuth();
+export default function Index() {
+  const [isServicesMenuOpen, setIsServicesMenuOpen] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+
+  const { user } = useAuth();
   const { role } = useUserRole(user?.id);
   const navigate = useNavigate();
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [loadingCampaigns, setLoadingCampaigns] = useState(true);
 
-  const getDashboardPath = () => {
-    if (role === 'doctor') return '/dashboard/doctor';
-    if (role === 'admin') return '/dashboard/admin';
-    return '/dashboard/patient';
-  };
-
-  // Fetch active awareness campaigns
+  // Close menus when clicking outside
   useEffect(() => {
-    const fetchCampaigns = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('awareness_campaigns')
-          .select('*')
-          .eq('status', 'active')
-          .order('scheduled_date', { ascending: false });
-
-        if (error) throw error;
-        setCampaigns(data || []);
-      } catch (error) {
-        console.error('Error fetching campaigns:', error);
-      } finally {
-        setLoadingCampaigns(false);
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (isServicesMenuOpen && !target.closest('#navServicesWrapper') && !target.closest('#servicesMenu')) {
+        setIsServicesMenuOpen(false);
       }
     };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [isServicesMenuOpen]);
 
-    fetchCampaigns();
-  }, []);
+  // Main flow actions
+  const handleBookClick = (title: string, img: string) => {
+    if (!user) {
+      navigate('/auth');
+    } else {
+      switch (role) {
+        case 'doctor':
+          navigate('/dashboard/doctor');
+          break;
+        case 'admin':
+          navigate('/dashboard/admin');
+          break;
+        default:
+          navigate('/dashboard/patient');
+      }
+    }
+  };
 
-  // Banner slides data with images - fallback if no campaigns
-  const defaultBannerSlides = [
-    {
-      title: "Expert Medical Care",
-      description: "Book appointments with top healthcare professionals from the comfort of your home.",
-      image: "/images/banners/medical-team.jpg",
-      overlay: "bg-black/40",
-      textColor: "text-white",
-      buttonVariant: "default" as const,
-      buttonText: "Book Now",
-      buttonLink: "/book/consultation"
-    },
-  ];
-
-  // Transform campaigns into banner slide format
-  const campaignSlides = campaigns.map(campaign => ({
-    title: campaign.title,
-    description: campaign.subtitle || "Learn more about this campaign",
-    image: campaign.image_url || "/images/banners/default-campaign.jpg",
-    overlay: "bg-black/50",
-    textColor: "text-white",
-    buttonVariant: "default" as const,
-    buttonText: "Learn More",
-    buttonLink: "/book/consultation"
-  }));
-
-  // Combine campaigns with default slides (campaigns first)
-  const bannerSlides = loadingCampaigns ? defaultBannerSlides : [...campaignSlides];
+  const handleContactClick = () => {
+    setIsContactModalOpen(true);
+  };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center transform rotate-45">
-              <Heart className="w-6 h-6 text-primary -rotate-45" fill="currentColor" />
-            </div>
-            <span className="text-2xl font-bold text-foreground"> St Gameliel's Hospital</span>
-          </Link>
+    <div className="bg-white text-slate-900 font-['Inter'] antialiased selection:bg-slate-200 overflow-x-hidden min-h-screen">
+      <LandingHero
+        onBookClick={handleBookClick}
+        onContactClick={handleContactClick}
+        isServicesMenuOpen={isServicesMenuOpen}
+        toggleServicesMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsServicesMenuOpen(!isServicesMenuOpen);
+        }}
+      />
 
-          {/* Navigation */}
-          <nav className="hidden md:flex items-center gap-8">
-            {/* <Link to="/" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
-              Home
-            </Link> */}
-            {/* <Link to="/dashboard/patient" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
-              My Appointments
-            </Link> */}
-            {/* <Link to="/doctors" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
-              Doctors
-            </Link> */}
-            {/* <Link to="/contact" className="text-[hsl(222,47%,11%)] hover:text-primary transition-colors font-medium">
-              Contact Us
-            </Link> */}
-          </nav>
+      <LandingServices onBookClick={handleBookClick} />
 
-          {/* Auth Buttons */}
-          <div className="flex items-center gap-3">
-            <ThemeSwitcher />
-            {!loading && (
-              user ? (
-                <Button 
-                  onClick={() => navigate(getDashboardPath())}
-                  className="bg-primary hover:bg-primary/90 text-white"
-                >
-                  Dashboard
-                </Button>
-              ) : (
-                <>
-                  <Button 
-                    asChild 
-                    className="bg-primary hover:bg-primary/90 text-white"
-                  >
-                    <Link to="/auth?mode=signup">Sign Up</Link>
-                  </Button>
-                  <Button 
-                    asChild
-                    variant="outline"
-                  >
-                    <Link to="/auth">Login</Link>
-                  </Button>
-                </>
-              )
-            )}
-        </div>
-        </div>
-      </header>
+      <LandingConsultation onBookClick={handleBookClick} />
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 py-16 md:py-24">
-        <div className="grid md:grid-cols-2 gap-12 items-center">
-          <div className="space-y-6">
-            <h1 className="text-5xl md:text-6xl font-bold text-foreground leading-tight">
-              Quality Healthcare,<br />Your Way
-          </h1>
-            <p className="text-xl text-muted-foreground">
-              Book your appointment online, at the hospital, or from the comfort of your home.
-            </p>
-          </div>
-          <div className="hidden md:block">
-            <div className="relative w-full h-[500px] rounded-2xl overflow-hidden shadow-xl">
-              <img 
-                src="/doctor.jpg" 
-                alt="Professional medical doctor in surgical attire" 
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <LandingAbout />
 
-      {/* Carousel Banner */}
-      <section className="w-full py-8 md:py-12 bg-muted/30">
-        <div className="container px-4 md:px-6">
-          <Carousel className="w-full mx-auto">
-            <CarouselContent>
-              {bannerSlides.map((slide, index) => (
-                <CarouselItem key={`slide-${index}`}>
-                  <div className="p-1">
-                    <Card className="border-0 overflow-hidden">
-                      <div 
-                        className="relative w-full aspect-video md:aspect-[3/1] bg-cover bg-fill bg-muted"
-                        style={{ backgroundImage: `url(${slide.image})` }}
-                      >
-                        <div className={`absolute inset-0 ${slide.overlay}`}></div>
-                        <CardContent className="flex flex-col items-center justify-center h-full p-6 relative z-10">
-                          <div className="text-center max-w-3xl mx-auto">
-                            <h2 className={`text-2xl md:text-4xl font-bold mb-4 ${slide.textColor}`}>
-                              {slide.title}
-                            </h2>
-                            <p className={`${slide.textColor} mb-6 text-sm md:text-base`}>
-                              {slide.description}
-                            </p>
-                            {/* <Button 
-                              variant={slide.buttonVariant}
-                              className="mt-4 bg-primary hover:bg-primary/90 text-white"
-                              asChild
-                            >
-                              <Link to={slide.buttonLink}>
-                                {slide.buttonText}
-                              </Link>
-                            </Button> */}
-                          </div>
-                        </CardContent>
-                      </div>
-                    </Card>
-                  </div>
-                </CarouselItem>
-              ))}
-            </CarouselContent>
-            <CarouselPrevious className="left-2 md:left-4" />
-            <CarouselNext className="right-2 md:right-4" />
-          </Carousel>
-        </div>
-      </section>
+      <LandingFooter />
 
-      {/* Choose Your Consultation Type */}
-      <section className="bg-muted/30 py-16 md:py-20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold text-foreground mb-3">
-              Choose Your Consultation Type
-            </h2>
-          </div>
+      {/* Floating reload icon (bottom right decoration) */}
+      <div
+        className="fixed bottom-8 right-8 w-14 h-14 bg-white rounded-full shadow-xl flex items-center justify-center text-slate-900 border border-slate-100 z-50 cursor-pointer hover:scale-105 transition-transform"
+        onClick={() => window.location.reload()}
+      >
+        <RefreshCw className="w-6 h-6 stroke-[1.5px]" />
+      </div>
 
-          <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-            {/* Online Consultation */}
-            <Card className="border hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Video className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-2xl">Online Consultation</CardTitle>
-                <CardDescription className="text-base">
-                  Convenient virtual care from anywhere.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button 
-                  asChild 
-                  className="w-full bg-primary hover:bg-primary/90 text-white"
-                >
-                  <Link to="/auth?redirect=/book/online">Book Now</Link>
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* In-Person Hospital Visit */}
-            <Card className="border hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Hospital className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-2xl">In-Person Hospital Visit</CardTitle>
-                <CardDescription className="text-base">
-                  Access to our full facilities and direct care.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-              <Button 
-                  asChild 
-                  className="w-full bg-primary hover:bg-primary/90 text-white"
-              >
-                  <Link to="/auth?redirect=/book/hospital">Book Now</Link>
-              </Button>
-              </CardContent>
-            </Card>
-
-            {/* Home Visit */}
-            <Card className="border hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Home className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-2xl">Home Visit</CardTitle>
-                <CardDescription className="text-base">
-                  Personalized care for those who prefer staying at home.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-              <Button 
-                asChild 
-                  className="w-full bg-primary hover:bg-primary/90 text-white"
-              >
-                  <Link to="/auth?redirect=/book/home">Book Now</Link>
-              </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Care You Can Trust */}
-      <section className="py-16 md:py-20 bg-background">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-12 max-w-3xl mx-auto">
-            <h2 className="text-4xl font-bold text-foreground mb-4">
-              Care You Can Trust
-            </h2>
-            <p className="text-lg text-muted-foreground">
-              We are committed to providing the best care possible with our team of dedicated professionals.
-            </p>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-            {/* 24/7 Support */}
-            <Card className="border hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Headphones className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-2xl">24/7 Support</CardTitle>
-                <CardDescription className="text-base">
-                  Our support team is always available to assist you with your needs.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-
-            {/* Experienced Doctors */}
-            <Card className="border hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Users className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-2xl">Experienced Doctors</CardTitle>
-                <CardDescription className="text-base">
-                  Consult with our board-certified and highly experienced medical staff.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-
-            {/* Affordable Care */}
-            <Card className="border hover:shadow-lg transition-shadow">
-            <CardHeader>
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <DollarSign className="w-8 h-8 text-primary" />
-              </div>
-                <CardTitle className="text-2xl">Affordable Care</CardTitle>
-                <CardDescription className="text-base">
-                  Transparent and affordable pricing for all our consultation services.
-              </CardDescription>
-            </CardHeader>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="bg-muted/30 border-t py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            {/* Services */}
-            <div>
-              <h3 className="text-foreground font-bold text-lg mb-4">SERVICES</h3>
-              <ul className="space-y-2">
-                <li>
-                  <Link to="/book/online" className="text-muted-foreground hover:text-primary transition-colors">
-                    Online Consultation
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/book/hospital" className="text-muted-foreground hover:text-primary transition-colors">
-                    Hospital Visit
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/book/home" className="text-muted-foreground hover:text-primary transition-colors">
-                    Home Visit
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/doctors" className="text-muted-foreground hover:text-primary transition-colors">
-                    Find a Doctor
-                  </Link>
-                </li>
-              </ul>
-              </div>
-
-            {/* About */}
-            <div>
-              <h3 className="text-foreground font-bold text-lg mb-4">ABOUT</h3>
-              <ul className="space-y-2">
-                <li>
-                  <Link to="/about" className="text-muted-foreground hover:text-primary transition-colors">
-                    About Us
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/careers" className="text-muted-foreground hover:text-primary transition-colors">
-                    Careers
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/blog" className="text-muted-foreground hover:text-primary transition-colors">
-                    Blog
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/contact" className="text-muted-foreground hover:text-primary transition-colors">
-                    Contact Us
-                  </Link>
-                </li>
-              </ul>
-              </div>
-
-            {/* Legal */}
-            <div>
-              <h3 className="text-foreground font-bold text-lg mb-4">LEGAL</h3>
-              <ul className="space-y-2">
-                <li>
-                  <Link to="/privacy" className="text-muted-foreground hover:text-primary transition-colors">
-                    Privacy Policy
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/terms" className="text-muted-foreground hover:text-primary transition-colors">
-                    Terms of Service
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/faq" className="text-muted-foreground hover:text-primary transition-colors">
-                    FAQ
-                  </Link>
-                </li>
-              </ul>
-            </div>
-
-            {/* Contact */}
-            <div>
-              <h3 className="text-foreground font-bold text-lg mb-4">CONTACT</h3>
-              <ul className="space-y-2 text-muted-foreground">
-                <li>123 Health St, Medtown</li>
-                <li>contact@gamelishospital.com</li>
-                <li>(123) 456-7890</li>
-              </ul>
-            </div>
-        </div>
-
-          {/* Bottom Footer */}
-          <div className="border-t pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <p className="text-muted-foreground">
-              &copy; 2025 Gameli's Hospital. All rights reserved.
-            </p>
-            <div className="flex items-center gap-4">
-              <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
-                <Facebook className="w-5 h-5" />
-              </a>
-              <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
-                <Twitter className="w-5 h-5" />
-              </a>
-              {/* <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary transition-colors">
-                <Github className="w-5 h-5" />
-              </a> */}
-            </div>
-          </div>
-        </div>
-      </footer>
+      <LandingContactModal
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+      />
     </div>
   );
-};
-
-export default Index;
+}

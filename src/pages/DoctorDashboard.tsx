@@ -4,9 +4,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus } from "lucide-react";
+import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft } from "lucide-react";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -34,11 +35,26 @@ const DoctorDashboard = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'patients'>('dashboard');
+  const [selectedPatient, setSelectedPatient] = useState<string | null>(null);
+  const [isMonthExpanded, setIsMonthExpanded] = useState(false);
+  const { toast } = useToast();
+
+  const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
+  const [newSlotStart, setNewSlotStart] = useState("09:00");
+  const [newSlotEnd, setNewSlotEnd] = useState("17:00");
+  const [recurrence, setRecurrence] = useState("specific");
+  const [isAddingSlot, setIsAddingSlot] = useState(false);
+
+  // Notes state
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<string>("");
+  const [currentNotes, setCurrentNotes] = useState<string>("");
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+
   // Pagination state for Today's Schedule
   const [currentPage, setCurrentPage] = useState(1);
   const appointmentsPerPage = 5;
-  
+
   // Pagination state for Calendar Appointments
   const [calendarCurrentPage, setCalendarCurrentPage] = useState(1);
   const calendarAppointmentsPerPage = 5;
@@ -56,20 +72,23 @@ const DoctorDashboard = () => {
 
       setFullName(profile?.full_name ?? "");
 
-      // Fetch doctor + specialty
+      // Fetch doctor + specialties
       const { data: doctor } = await supabase
         .from("doctors")
-        .select("specialty_id")
+        .select(`
+          id,
+          doctor_specialties (
+            specialties (
+              name
+            )
+          )
+        `)
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (doctor?.specialty_id) {
-        const { data: specialty } = await supabase
-          .from("specialties")
-          .select("name")
-          .eq("id", doctor.specialty_id)
-          .maybeSingle();
-        setSpecialtyName(specialty?.name ?? "");
+      if (doctor?.doctor_specialties && doctor.doctor_specialties.length > 0) {
+        const specs = doctor.doctor_specialties.map((ds: any) => ds.specialties?.name).filter(Boolean);
+        setSpecialtyName(specs.join(', '));
       } else {
         setSpecialtyName("");
       }
@@ -172,7 +191,7 @@ const DoctorDashboard = () => {
       } else {
         console.log('No appointments found for this doctor.');
       }
-      
+
       setAllAppointments(appointmentsWithProfiles);
       console.log(`📅 Total appointments loaded for calendar: ${appointmentsWithProfiles.length} (all statuses, all dates)`);
 
@@ -202,16 +221,217 @@ const DoctorDashboard = () => {
     loadAllAppointments();
   }, [user?.id, currentMonth]);
 
+  // Fetch availability slots
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchAvailability = async () => {
+      const { data, error } = await supabase
+        .from('doctor_availability')
+        .select('*')
+        .eq('doctor_id', user.id);
+      
+      if (error) {
+        console.error('Error fetching availability:', error);
+      } else {
+        setAvailabilitySlots(data || []);
+      }
+    };
+    fetchAvailability();
+  }, [user?.id]);
+
+  const handleAddSlot = async () => {
+    if (!user?.id) return;
+    setIsAddingSlot(true);
+    
+    // Check if end_time is after start_time
+    if (newSlotEnd <= newSlotStart) {
+      toast({
+        title: "Invalid time range",
+        description: "End time must be after start time",
+        variant: "destructive"
+      });
+      setIsAddingSlot(false);
+      return;
+    }
+
+    const startStr = `${newSlotStart}:00`;
+    const endStr = `${newSlotEnd}:00`;
+
+    let inserts: any[] = [];
+    
+    if (recurrence === "specific") {
+      inserts.push({
+        doctor_id: user.id,
+        day_of_week: selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
+        date: getDateString(selectedDate),
+        start_time: startStr,
+        end_time: endStr
+      });
+    } else if (recurrence === "week") {
+      // Every day this week (Sun-Sat of the week containing selectedDate)
+      const date = new Date(selectedDate);
+      const day = date.getDay();
+      const diff = date.getDate() - day; // Adjust to Sunday
+      const startOfWeek = new Date(date.setDate(diff));
+      
+      for (let i = 0; i < 7; i++) {
+        const currentDate = new Date(startOfWeek);
+        currentDate.setDate(startOfWeek.getDate() + i);
+        inserts.push({
+          doctor_id: user.id,
+          day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
+          date: getDateString(currentDate),
+          start_time: startStr,
+          end_time: endStr
+        });
+      }
+    } else if (recurrence === "month_day") {
+      // Every [Weekday] this month
+      const targetDay = selectedDate.getDay();
+      const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
+      
+      for (let i = 1; i <= daysInMonth; i++) {
+        const currentDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
+        if (currentDate.getDay() === targetDay) {
+          inserts.push({
+            doctor_id: user.id,
+            day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
+            date: getDateString(currentDate),
+            start_time: startStr,
+            end_time: endStr
+          });
+        }
+      }
+    } else if (recurrence === "month_all") {
+      // Every day this month
+      const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
+      for (let i = 1; i <= daysInMonth; i++) {
+        const currentDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
+        inserts.push({
+          doctor_id: user.id,
+          day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
+          date: getDateString(currentDate),
+          start_time: startStr,
+          end_time: endStr
+        });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('doctor_availability')
+      .insert(inserts)
+      .select();
+
+    if (error) {
+      toast({
+        title: "Error adding slot",
+        description: error.message,
+        variant: "destructive"
+      });
+    } else if (data) {
+      setAvailabilitySlots(prev => [...prev, ...data]);
+      toast({
+        title: "Slot(s) added",
+        description: "Your availability has been updated."
+      });
+    }
+    setIsAddingSlot(false);
+  };
+
+  const handleDeleteSlot = async (id: string) => {
+    const { error } = await supabase
+      .from('doctor_availability')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      toast({
+        title: "Error removing slot",
+        description: error.message,
+        variant: "destructive"
+      });
+    } else {
+      setAvailabilitySlots(prev => prev.filter(slot => slot.id !== id));
+      toast({
+        title: "Slot removed",
+        description: "Your availability has been updated."
+      });
+    }
+  };
+
+  const formatTimeStr = (timeStr: string) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    const d = new Date();
+    d.setHours(parseInt(hours, 10), parseInt(minutes, 10));
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
+
+  const handleSaveNotes = async () => {
+    if (!selectedAppointmentId) {
+      toast({ title: "Select an appointment", description: "Please select an active patient appointment first." });
+      return;
+    }
+    
+    setIsSavingNotes(true);
+    const { error } = await supabase
+      .from('appointments')
+      .update({ notes: currentNotes })
+      .eq('id', selectedAppointmentId);
+
+    if (error) {
+      toast({ title: "Error saving notes", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Notes saved", description: "Clinical notes have been updated." });
+      // Update local state so it shows up immediately in history
+      setAllAppointments(prev => prev.map(apt => 
+        apt.id === selectedAppointmentId ? { ...apt, notes: currentNotes } : apt
+      ));
+    }
+    setIsSavingNotes(false);
+  };
+
+  // Compute unique patients for the history table
+  const patientHistory = useMemo(() => {
+    const uniqueMap = new Map();
+    allAppointments.forEach(apt => {
+      if (apt.patient_id && apt.profiles) {
+        const existing = uniqueMap.get(apt.patient_id);
+        if (!existing || new Date(apt.scheduled_at) > new Date(existing.scheduled_at)) {
+          uniqueMap.set(apt.patient_id, apt);
+        }
+      }
+    });
+    return Array.from(uniqueMap.values()).sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
+  }, [allAppointments]);
+
+  // Handle dropdown change
+  useEffect(() => {
+    if (selectedAppointmentId) {
+      const apt = allAppointments.find(a => a.id === selectedAppointmentId);
+      setCurrentNotes(apt?.notes || "");
+    } else {
+      setCurrentNotes("");
+    }
+  }, [selectedAppointmentId, allAppointments]);
+
+  // Set default selection for notes dropdown
+  useEffect(() => {
+    if (todayAppointments.length > 0 && !selectedAppointmentId) {
+      setSelectedAppointmentId(todayAppointments[0].id);
+    }
+  }, [todayAppointments, selectedAppointmentId]);
+
   // Fetch recent activities/notifications
   useEffect(() => {
     const fetchNotifications = async () => {
       if (!user?.id) return;
-      
+
       try {
         // Get appointments from the last 7 days
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        
+
         const { data: recentAppointments, error } = await supabase
           .from('appointments')
           .select('*')
@@ -355,7 +575,7 @@ const DoctorDashboard = () => {
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay();
-    
+
     return { daysInMonth, startingDayOfWeek, year, month };
   };
 
@@ -375,19 +595,19 @@ const DoctorDashboard = () => {
 
   const getAppointmentsForDate = (date: Date) => {
     const targetDateStr = getDateString(date);
-    
+
     const matches = allAppointments.filter((apt: any) => {
       if (!apt.scheduled_at) {
         console.warn('Appointment missing scheduled_at:', apt.id);
         return false;
       }
-      
+
       // Get date string from appointment's scheduled_at (YYYY-MM-DD format)
       const aptDateStr = getDateString(apt.scheduled_at);
-      
+
       // Compare date strings directly - include ALL statuses (pending, confirmed, completed, cancelled)
       const match = aptDateStr === targetDateStr;
-      
+
       if (match) {
         console.log(`✅ Found appointment match for ${targetDateStr}:`, {
           apt_id: apt.id,
@@ -397,21 +617,21 @@ const DoctorDashboard = () => {
           target_date_str: targetDateStr
         });
       }
-      
+
       return match;
     });
-    
+
     // Sort appointments by time (scheduled_at)
     matches.sort((a: any, b: any) => {
       const timeA = new Date(a.scheduled_at).getTime();
       const timeB = new Date(b.scheduled_at).getTime();
       return timeA - timeB;
     });
-    
+
     if (matches.length > 0) {
       console.log(`Found ${matches.length} appointment(s) for ${targetDateStr} (all statuses)`);
     }
-    
+
     return matches;
   };
 
@@ -442,7 +662,7 @@ const DoctorDashboard = () => {
 
   const { daysInMonth, startingDayOfWeek, year, month } = getDaysInMonth(currentMonth);
   const selectedDateAppointments = getAppointmentsForDate(selectedDate);
-  
+
   // Calculate pagination for calendar appointments
   const calendarTotalPages = Math.ceil(selectedDateAppointments.length / calendarAppointmentsPerPage);
   const calendarIndexOfLastAppointment = calendarCurrentPage * calendarAppointmentsPerPage;
@@ -475,7 +695,7 @@ const DoctorDashboard = () => {
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitcher />
-            
+
             {/* Notifications Popover */}
             <Popover>
               <PopoverTrigger asChild>
@@ -550,10 +770,31 @@ const DoctorDashboard = () => {
         </div>
       </header>
 
+      {/* Tabs */}
+      <div className="border-b bg-card/95 backdrop-blur-sm sticky top-[73px] z-40">
+        <div className="container mx-auto px-4 flex items-center gap-8 h-12">
+          <button 
+            onClick={() => setActiveTab('dashboard')} 
+            className={`h-full flex items-center border-b-2 text-sm font-medium transition-colors ${activeTab === 'dashboard' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            Dashboard
+          </button>
+          <button 
+            onClick={() => setActiveTab('patients')} 
+            className={`h-full flex items-center border-b-2 text-sm font-medium transition-colors ${activeTab === 'patients' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            Patients
+          </button>
+        </div>
+      </div>
+
       <div className="container mx-auto px-4 py-8">
-        {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">{`Welcome back, ${fullName ? `Dr. ${fullName}` : "Doctor"}!`}</h1>
+        {/* Dashboard View Content */}
+        {activeTab === 'dashboard' && (
+          <div className="animate-in fade-in duration-300">
+            {/* Welcome Section */}
+            <div className="mb-8">
+              <h1 className="text-3xl font-bold text-foreground mb-2">{`Welcome back, ${fullName ? `Dr. ${fullName}` : "Doctor"}!`}</h1>
           <p className="text-muted-foreground">{specialtyName || ""}</p>
         </div>
 
@@ -659,30 +900,29 @@ const DoctorDashboard = () => {
                       const appointmentCount = dayAppointments.length;
                       const isTodayDate = isToday(date);
                       const isSelected = isSelectedDate(date);
-                      
+
                       return (
                         <button
                           key={day}
                           onClick={() => setSelectedDate(date)}
                           className={`
                             relative p-2 text-sm rounded-lg border-2 transition-all hover:scale-105 hover:shadow-md min-h-[3rem] flex flex-col items-center justify-center
-                            ${isSelected 
-                              ? 'bg-primary text-primary-foreground border-primary shadow-lg' 
+                            ${isSelected
+                              ? 'bg-primary text-primary-foreground border-primary shadow-lg'
                               : isTodayDate
-                              ? 'bg-primary/20 border-primary font-bold'
-                              : hasAppointments
-                              ? 'bg-accent/20 border-accent/60 hover:border-accent font-medium shadow-sm'
-                              : 'border-border hover:border-primary/50 bg-background'
+                                ? 'bg-primary/20 border-primary font-bold'
+                                : hasAppointments
+                                  ? 'bg-accent/20 border-accent/60 hover:border-accent font-medium shadow-sm'
+                                  : 'border-border hover:border-primary/50 bg-background'
                             }
                           `}
                         >
                           <div className="text-center font-semibold">{day}</div>
                           {hasAppointments && (
-                            <div className={`absolute -top-1 -right-1 flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold shadow-md ${
-                              isSelected 
-                                ? 'bg-primary-foreground text-primary' 
+                            <div className={`absolute -top-1 -right-1 flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold shadow-md ${isSelected
+                                ? 'bg-primary-foreground text-primary'
                                 : 'bg-accent text-accent-foreground'
-                            }`}>
+                              }`}>
                               {appointmentCount > 99 ? '99+' : appointmentCount}
                             </div>
                           )}
@@ -726,91 +966,91 @@ const DoctorDashboard = () => {
                       <>
                         <div className="space-y-2">
                           {currentCalendarAppointments.map((apt: any) => {
-                          const scheduledDate = new Date(apt.scheduled_at);
-                          // Determine status badge variant
-                          const getStatusVariant = (status: string) => {
-                            switch (status?.toLowerCase()) {
-                              case 'confirmed':
-                                return 'default';
-                              case 'completed':
-                                return 'secondary';
-                              case 'cancelled':
-                                return 'destructive';
-                              case 'pending':
-                              default:
-                                return 'outline';
-                            }
-                          };
-                          
-                          // Determine status color for border/background (more subtle, muted colors)
-                          const getStatusColor = (status: string) => {
-                            switch (status?.toLowerCase()) {
-                              case 'confirmed':
-                                return 'border-l-4 border-l-green-600/40 bg-muted/30 dark:bg-muted/20';
-                              case 'completed':
-                                return 'border-l-4 border-l-slate-400/40 bg-muted/20 dark:bg-muted/10';
-                              case 'cancelled':
-                                return 'border-l-4 border-l-red-500/40 bg-muted/30 dark:bg-muted/20';
-                              case 'pending':
-                              default:
-                                return 'border-l-4 border-l-amber-500/40 bg-muted/30 dark:bg-muted/20';
-                            }
-                          };
+                            const scheduledDate = new Date(apt.scheduled_at);
+                            // Determine status badge variant
+                            const getStatusVariant = (status: string) => {
+                              switch (status?.toLowerCase()) {
+                                case 'confirmed':
+                                  return 'default';
+                                case 'completed':
+                                  return 'secondary';
+                                case 'cancelled':
+                                  return 'destructive';
+                                case 'pending':
+                                default:
+                                  return 'outline';
+                              }
+                            };
 
-                          return (
-                            <div 
-                              key={apt.id} 
-                              className={`flex items-center justify-between p-3 border border-border/50 rounded-lg transition-all hover:shadow-sm hover:border-border ${getStatusColor(apt.status || 'pending')}`}
-                            >
-                              <div className="flex items-center gap-3 flex-1">
-                                <Avatar className="h-10 w-10">
-                                  <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                                    {apt.profiles?.full_name?.split(' ').map((n: string) => n[0]).join('') || 'PT'}
-                                  </AvatarFallback>
-                                </Avatar>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <p className="font-medium text-sm">{apt.profiles?.full_name || 'Patient'}</p>
-                                    <Badge 
-                                      variant={getStatusVariant(apt.status || 'pending')}
-                                      className="text-xs"
-                                    >
-                                      {apt.status || 'pending'}
-                                    </Badge>
-                                  </div>
-                                  <div className="flex items-center gap-3 mt-1">
-                                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                      <Clock className="w-3 h-3" />
-                                      {scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </p>
-                                    <Badge variant={apt.type === "online" ? "default" : "secondary"} className="text-xs">
-                                      {apt.type || 'hospital'}
-                                    </Badge>
-                                    {apt.specialties?.name && (
-                                      <span className="text-xs text-muted-foreground">
-                                        {apt.specialties.name}
-                                      </span>
+                            // Determine status color for border/background (more subtle, muted colors)
+                            const getStatusColor = (status: string) => {
+                              switch (status?.toLowerCase()) {
+                                case 'confirmed':
+                                  return 'border-l-4 border-l-green-600/40 bg-muted/30 dark:bg-muted/20';
+                                case 'completed':
+                                  return 'border-l-4 border-l-slate-400/40 bg-muted/20 dark:bg-muted/10';
+                                case 'cancelled':
+                                  return 'border-l-4 border-l-red-500/40 bg-muted/30 dark:bg-muted/20';
+                                case 'pending':
+                                default:
+                                  return 'border-l-4 border-l-amber-500/40 bg-muted/30 dark:bg-muted/20';
+                              }
+                            };
+
+                            return (
+                              <div
+                                key={apt.id}
+                                className={`flex items-center justify-between p-3 border border-border/50 rounded-lg transition-all hover:shadow-sm hover:border-border ${getStatusColor(apt.status || 'pending')}`}
+                              >
+                                <div className="flex items-center gap-3 flex-1">
+                                  <Avatar className="h-10 w-10">
+                                    <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                                      {apt.profiles?.full_name?.split(' ').map((n: string) => n[0]).join('') || 'PT'}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-medium text-sm">{apt.profiles?.full_name || 'Patient'}</p>
+                                      <Badge
+                                        variant={getStatusVariant(apt.status || 'pending')}
+                                        className="text-xs"
+                                      >
+                                        {apt.status || 'pending'}
+                                      </Badge>
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-1">
+                                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                        <Clock className="w-3 h-3" />
+                                        {scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </p>
+                                      <Badge variant={apt.type === "online" ? "default" : "secondary"} className="text-xs">
+                                        {apt.type || 'hospital'}
+                                      </Badge>
+                                      {apt.specialties?.name && (
+                                        <span className="text-xs text-muted-foreground">
+                                          {apt.specialties.name}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {apt.symptoms && (
+                                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                                        {apt.symptoms}
+                                      </p>
                                     )}
                                   </div>
-                                  {apt.symptoms && (
-                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                                      {apt.symptoms}
-                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {apt.type === "online" && apt.status !== 'cancelled' && (
+                                    <Button size="sm" variant="outline" title="Start video call">
+                                      <Video className="w-4 h-4" />
+                                    </Button>
                                   )}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                {apt.type === "online" && apt.status !== 'cancelled' && (
-                                  <Button size="sm" variant="outline" title="Start video call">
-                                    <Video className="w-4 h-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
                         </div>
-                        
+
                         {selectedDateAppointments.length > calendarAppointmentsPerPage && (
                           <div className="flex items-center justify-between pt-4 border-t mt-4">
                             <Button
@@ -899,7 +1139,7 @@ const DoctorDashboard = () => {
                           </div>
                         </div>
                       ))}
-                      
+
                       {todayAppointments.length > appointmentsPerPage && (
                         <div className="flex items-center justify-between pt-4 border-t">
                           <Button
@@ -952,6 +1192,157 @@ const DoctorDashboard = () => {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            {/* Manage Availability */}
+            <Card className="flex flex-col relative overflow-hidden bg-card/80 backdrop-blur-sm border-border/50">
+              <div className="absolute top-0 left-0 w-1 h-full bg-primary"></div>
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Manage Availability</CardTitle>
+                <CardDescription>Select a date to set open slots</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {/* Mini Calendar */}
+                <div className="bg-muted/30 rounded-xl p-4 border border-border">
+                  <div className="flex items-center justify-between mb-3">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded text-muted-foreground hover:text-foreground">
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <span className="text-xs font-semibold">
+                      {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </span>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 rounded text-muted-foreground hover:text-foreground"
+                      onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 mb-1">
+                    {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
+                      <div key={day} className="text-center text-[10px] font-semibold text-muted-foreground">{day}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {/* Mini calendar days */}
+                    {(isMonthExpanded ? Array.from({length: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()}, (_, i) => i + 1) : [selectedDate.getDate(), selectedDate.getDate()+1, selectedDate.getDate()+2, selectedDate.getDate()+3, selectedDate.getDate()+4, selectedDate.getDate()+5, selectedDate.getDate()+6]).map((day, i) => {
+                      // Adjust dummy sliding window for the mini view when not expanded
+                      const displayDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                      const isSelected = displayDate.toDateString() === selectedDate.toDateString();
+                      const displayDateStr = getDateString(displayDate);
+                      const displayDayName = displayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                      const hasAvailability = availabilitySlots.some(slot => 
+                        slot.date === displayDateStr || (!slot.date && slot.day_of_week === displayDayName)
+                      );
+                      
+                      return (
+                        <div 
+                          key={i} 
+                          onClick={() => setSelectedDate(displayDate)}
+                          className={`aspect-square flex flex-col justify-center items-center gap-[2px] text-xs font-medium rounded cursor-pointer transition-colors ${isSelected ? 'text-primary-foreground bg-primary shadow-sm' : hasAvailability ? 'text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'}`}
+                        >
+                          <span>{displayDate.getDate()}</span>
+                          {hasAvailability && (
+                            <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-primary-foreground' : 'bg-primary'}`}></span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-3 text-center">
+                    <button 
+                      onClick={() => setIsMonthExpanded(!isMonthExpanded)} 
+                      className="text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+                    >
+                      {isMonthExpanded ? "Show current week" : "Show full month"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Available Slots */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Available Slots ({selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})
+                  </label>
+                  
+                  {availabilitySlots
+                    .filter(slot => slot.date === getDateString(selectedDate) || (!slot.date && slot.day_of_week === selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()))
+                    .sort((a,b) => a.start_time.localeCompare(b.start_time))
+                    .map((slot, index) => (
+                    <div key={slot.id || index} className="group flex items-center justify-between bg-background rounded-lg px-3 py-2 border border-border hover:border-muted-foreground/30 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">{formatTimeStr(slot.start_time)} - {formatTimeStr(slot.end_time)}</span>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        onClick={() => handleDeleteSlot(slot.id)}
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  
+                  {availabilitySlots.filter(slot => slot.date === getDateString(selectedDate) || (!slot.date && slot.day_of_week === selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase())).length === 0 && (
+                    <div className="text-center py-4 bg-muted/10 rounded-lg border border-border text-xs text-muted-foreground">
+                      No availability set for this day.
+                    </div>
+                  )}
+                </div>
+
+                {/* Add Time Slot */}
+                <div className="space-y-3 mt-auto border-t pt-4">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Add Time Slot &amp; Recurrence
+                  </label>
+                  <div className="flex flex-col gap-3">
+                    <div className="relative w-full">
+                      <select 
+                        className="w-full bg-background border border-input rounded-lg pl-3 pr-7 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer appearance-none"
+                        value={recurrence}
+                        onChange={(e) => setRecurrence(e.target.value)}
+                      >
+                        <option value="specific">Specific Date ({selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</option>
+                        <option value="week">Every day this Week</option>
+                        <option value="month_day">Every {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })} this Month</option>
+                        <option value="month_all">Every day this Month</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    </div>
+                    <div className="flex flex-col xl:flex-row items-center gap-2">
+                      <div className="flex-1 relative w-full">
+                        <input 
+                          type="time" 
+                          value={newSlotStart}
+                          onChange={(e) => setNewSlotStart(e.target.value)}
+                          className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer"
+                        />
+                      </div>
+                      <span className="text-muted-foreground hidden xl:block text-xs">to</span>
+                      <div className="flex-1 relative w-full">
+                        <input 
+                          type="time" 
+                          value={newSlotEnd}
+                          onChange={(e) => setNewSlotEnd(e.target.value)}
+                          className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer"
+                        />
+                      </div>
+                      <Button 
+                        type="button" 
+                        onClick={handleAddSlot}
+                        disabled={isAddingSlot}
+                        className="w-full xl:w-auto px-4 shadow-sm shrink-0"
+                      >
+                        {isAddingSlot ? "Adding..." : "Add"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Doctor Profile</CardTitle>
@@ -1009,6 +1400,215 @@ const DoctorDashboard = () => {
             </Button>
           </div>
         </div>
+        </div>
+        )}
+
+        {/* Patients View Content */}
+        {activeTab === 'patients' && (
+          <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="mb-6">
+              <h1 className="text-3xl font-bold tracking-tight text-foreground mb-1">
+                Patient Management
+              </h1>
+              <p className="text-base text-muted-foreground">
+                View patient history, manage records, and update clinical notes
+              </p>
+            </div>
+
+            {!selectedPatient ? (
+              <div className="grid lg:grid-cols-3 gap-6 items-start">
+                {/* Patient History */}
+                <Card className="lg:col-span-2 flex flex-col h-full bg-card/80 backdrop-blur-sm border-border/50">
+                <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4">
+                  <CardTitle className="text-xl">Patient History</CardTitle>
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input 
+                      type="text" 
+                      placeholder="Search patients..." 
+                      className="w-full bg-background border border-input rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-muted-foreground"
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className="flex-1 p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[600px]">
+                      <thead>
+                        <tr className="border-y border-border/60 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/20">
+                          <th className="py-3 px-4 font-medium">Patient Name</th>
+                          <th className="py-3 px-4 font-medium">Last Visit</th>
+                          <th className="py-3 px-4 font-medium">Diagnosis / Reason</th>
+                          <th className="py-3 px-4 font-medium">Status</th>
+                          <th className="py-3 px-4 font-medium text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-sm divide-y divide-border/30">
+                        {patientHistory.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-muted-foreground">No patients found</td>
+                          </tr>
+                        ) : (
+                          patientHistory.map((apt: any) => (
+                            <tr key={apt.patient_id} className="hover:bg-muted/30 transition-colors">
+                              <td className="py-4 px-4 font-medium text-foreground">{apt.profiles?.full_name}</td>
+                              <td className="py-4 px-4 text-muted-foreground">
+                                {new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </td>
+                              <td className="py-4 px-4 text-muted-foreground truncate max-w-[200px]">
+                                {apt.notes || "No recent notes"}
+                              </td>
+                              <td className="py-4 px-4">
+                                <Badge variant="outline" className={
+                                  apt.status === 'completed' ? "text-green-600 bg-green-500/10 border-green-500/20" :
+                                  apt.status === 'pending' || apt.status === 'scheduled' ? "text-blue-600 bg-blue-500/10 border-blue-500/20" :
+                                  apt.status === 'confirmed' ? "text-yellow-600 bg-yellow-500/10 border-yellow-500/20" :
+                                  "text-gray-600 bg-gray-500/10 border-gray-500/20"
+                                }>
+                                  {apt.status.charAt(0).toUpperCase() + apt.status.slice(1)}
+                                </Badge>
+                              </td>
+                              <td className="py-4 px-4 text-right">
+                                <Button variant="link" size="sm" className="text-primary p-0" onClick={() => setSelectedPatient(apt.patient_id)}>
+                                  View Profile
+                                </Button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Clinical Notes */}
+              <Card className="flex flex-col h-full bg-card/80 backdrop-blur-sm border-border/50">
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-xl">Clinical Notes</CardTitle>
+                  <CardDescription>Record observations for current patient</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5 flex-1 flex flex-col pt-0">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-muted-foreground">Select Active Patient</label>
+                    <div className="relative">
+                      <select 
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background cursor-pointer appearance-none focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        value={selectedAppointmentId}
+                        onChange={(e) => setSelectedAppointmentId(e.target.value)}
+                      >
+                        <option value="">-- Select Appointment --</option>
+                        {todayAppointments.map((apt: any) => (
+                          <option key={apt.id} value={apt.id}>{apt.patient} ({apt.time})</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    </div>
+                  </div>
+                  <div className="space-y-2 flex-1 flex flex-col">
+                    <label className="block text-xs font-medium text-muted-foreground">Consultation Notes</label>
+                    <textarea 
+                      className="flex min-h-[180px] w-full flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none leading-relaxed"
+                      placeholder="Enter patient symptoms, diagnosis, and treatment plan..."
+                      value={currentNotes}
+                      onChange={(e) => setCurrentNotes(e.target.value)}
+                    ></textarea>
+                  </div>
+                  <Button 
+                    className="w-full mt-auto gap-2" 
+                    onClick={handleSaveNotes}
+                    disabled={isSavingNotes || !selectedAppointmentId}
+                  >
+                    <FilePlus className="w-5 h-5" />
+                    {isSavingNotes ? "Saving..." : "Save Notes"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+            ) : (() => {
+              const selectedProfile = patientHistory.find(p => p.patient_id === selectedPatient)?.profiles;
+              const patientName = selectedProfile?.full_name || "Unknown Patient";
+              const patientInitials = patientName.split(' ').map((n:any)=>n[0]).join('').substring(0,2).toUpperCase();
+              const profileAppointments = allAppointments.filter(apt => apt.patient_id === selectedPatient).sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
+              
+              return (
+              <div className="flex flex-col gap-6 lg:gap-8 animate-in fade-in duration-300">
+                <div className="flex items-center gap-4">
+                  <Button variant="outline" size="icon" onClick={() => setSelectedPatient(null)} className="h-10 w-10 shrink-0">
+                    <ArrowLeft className="w-5 h-5" />
+                  </Button>
+                  <div>
+                    <h2 className="text-2xl font-semibold tracking-tight text-foreground mb-1">
+                      {patientName}
+                    </h2>
+                    <p className="text-sm font-normal text-muted-foreground">
+                      Patient Profile & Clinical History
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 lg:gap-8 items-start">
+                  <div className="flex flex-col gap-6">
+                    <Card className="flex flex-col items-center p-6 bg-card/80 backdrop-blur-sm border-border/50 text-center">
+                      <Avatar className="h-24 w-24 mb-5 border-2 border-primary/20 p-1">
+                        <AvatarFallback className="bg-primary/10 text-primary text-3xl font-semibold">
+                          {patientInitials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <h3 className="text-xl font-semibold text-foreground mb-1">
+                        {patientName}
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-6">Patient ID: #{selectedPatient?.substring(0, 8)}</p>
+
+                      <div className="w-full space-y-4 text-left">
+                        <div className="flex justify-between border-b pb-3">
+                          <span className="text-sm text-muted-foreground">Phone</span>
+                          <span className="text-sm font-medium text-foreground">{selectedProfile?.phone || "N/A"}</span>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="xl:col-span-2 flex flex-col gap-6">
+                    <Card className="p-6 bg-card/80 backdrop-blur-sm border-border/50">
+                      <h2 className="text-xl font-semibold tracking-tight text-foreground mb-8">
+                        Clinical Notes History
+                      </h2>
+
+                      <div className="space-y-0">
+                        {profileAppointments.length === 0 ? (
+                          <div className="text-center text-muted-foreground py-8">No clinical history found</div>
+                        ) : (
+                          profileAppointments.map((apt, index) => (
+                            <div key={apt.id} className={`relative pl-6 border-l-2 ${index === profileAppointments.length - 1 ? 'border-transparent pb-2' : 'border-border pb-8'}`}>
+                              <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full ${index === 0 ? 'bg-primary' : 'bg-muted-foreground'} ring-4 ring-background`}></div>
+                              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
+                                <div>
+                                  <h4 className="text-base font-semibold text-foreground">
+                                    {apt.symptoms ? 'Consultation' : 'Routine Checkup'}
+                                  </h4>
+                                  <p className="text-xs text-muted-foreground mt-0.5">
+                                    {apt.type === 'online' ? 'Online Consultation' : apt.type === 'home' ? 'Home Visit' : 'Hospital Visit'}
+                                  </p>
+                                </div>
+                                <Badge variant="outline" className="font-medium bg-background shadow-sm">
+                                  {new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </Badge>
+                              </div>
+                              <div className="bg-muted/30 rounded-xl p-4 sm:p-5 border border-border text-sm text-foreground/80 leading-relaxed">
+                                {apt.notes || (apt.symptoms ? `Symptoms reported: ${apt.symptoms}` : "No comprehensive clinical notes recorded for this visit.")}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -30,7 +30,7 @@ const Payment = () => {
 
   const handlePayment = () => {
     setProcessing(true);
-    
+
     // Simulate payment processing
     setTimeout(() => {
       setProcessing(false);
@@ -115,7 +115,7 @@ const Payment = () => {
                   <div className="space-y-4 pt-4">
                     <div className="space-y-2">
                       <Label htmlFor="provider">Mobile Money Provider</Label>
-                      <RadioGroup value={momoData.provider} onValueChange={(value) => setMomoData({...momoData, provider: value})}>
+                      <RadioGroup value={momoData.provider} onValueChange={(value) => setMomoData({ ...momoData, provider: value })}>
                         <div className="grid grid-cols-3 gap-3">
                           <div className="flex items-center space-x-2 p-3 border rounded-lg cursor-pointer hover:border-primary">
                             <RadioGroupItem value="mtn" id="mtn" />
@@ -135,11 +135,11 @@ const Payment = () => {
 
                     <div className="space-y-2">
                       <Label htmlFor="momo-phone">Mobile Money Number</Label>
-                      <Input 
+                      <Input
                         id="momo-phone"
                         placeholder="0XX XXX XXXX"
                         value={momoData.phone}
-                        onChange={(e) => setMomoData({...momoData, phone: e.target.value})}
+                        onChange={(e) => setMomoData({ ...momoData, phone: e.target.value })}
                       />
                       <p className="text-sm text-muted-foreground">
                         You'll receive a prompt on your phone to authorize the payment
@@ -153,43 +153,43 @@ const Payment = () => {
                   <div className="space-y-4 pt-4">
                     <div className="space-y-2">
                       <Label htmlFor="card-number">Card Number</Label>
-                      <Input 
+                      <Input
                         id="card-number"
                         placeholder="1234 5678 9012 3456"
                         value={cardData.number}
-                        onChange={(e) => setCardData({...cardData, number: e.target.value})}
+                        onChange={(e) => setCardData({ ...cardData, number: e.target.value })}
                       />
                     </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="card-name">Cardholder Name</Label>
-                      <Input 
+                      <Input
                         id="card-name"
                         placeholder="John Doe"
                         value={cardData.name}
-                        onChange={(e) => setCardData({...cardData, name: e.target.value})}
+                        onChange={(e) => setCardData({ ...cardData, name: e.target.value })}
                       />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="expiry">Expiry Date</Label>
-                        <Input 
+                        <Input
                           id="expiry"
                           placeholder="MM/YY"
                           value={cardData.expiry}
-                          onChange={(e) => setCardData({...cardData, expiry: e.target.value})}
+                          onChange={(e) => setCardData({ ...cardData, expiry: e.target.value })}
                         />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="cvv">CVV</Label>
-                        <Input 
+                        <Input
                           id="cvv"
                           placeholder="123"
                           type="password"
                           maxLength={3}
                           value={cardData.cvv}
-                          onChange={(e) => setCardData({...cardData, cvv: e.target.value})}
+                          onChange={(e) => setCardData({ ...cardData, cvv: e.target.value })}
                         />
                       </div>
                     </div>
@@ -207,8 +207,8 @@ const Payment = () => {
                   </div>
                 </div>
 
-                <Button 
-                  className="w-full" 
+                <Button
+                  className="w-full"
                   size="lg"
                   onClick={handlePayment}
                   disabled={processing}
@@ -237,7 +237,7 @@ const Payment = () => {
                     <span className="font-medium">45 minutes</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Consultation Fee:</span>
+                    <span className="text-muted-foreground">Amount:</span>
                     <span className="font-medium">{amount} GHS</span>
                   </div>
                 </div>

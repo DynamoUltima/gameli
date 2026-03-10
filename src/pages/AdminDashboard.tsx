@@ -9,20 +9,27 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useDoctors } from "@/hooks/useDoctors";
+import { Settings, Users, LogOut, CheckCircle, Clock, Eye, Ban, Edit, Trash2, UserPlus, PlusCircle, Search, CalendarDays, Loader2, Download, FileText } from "lucide-react";
 import { AddDoctorDialog } from "@/components/admin/AddDoctorDialog";
+import { EditDoctorDialog } from "@/components/admin/EditDoctorDialog";
+import { DoctorCalendarView } from "@/components/admin/DoctorCalendarView";
+import { generateReport } from "@/utils/reportGenerator";
 import { supabase } from "@/integrations/supabase/client";
 import { v4 as uuidv4 } from 'uuid';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AlertCircle } from "lucide-react";
 import {
   LayoutDashboard,
-  Users,
   Calendar,
   Bell,
   MessageSquare,
@@ -35,30 +42,22 @@ import {
   Video,
   Hospital,
   Home as HomeIcon,
-  UserPlus,
-  FileText,
-  PlusCircle,
-  Loader2,
   Send,
-  Search,
   Filter,
-  Download,
-  Eye,
-  Edit,
-  Trash2,
-  CheckCircle,
   XCircle,
-  Clock,
   DollarSign,
   Star,
-  LogOut,
   ChevronLeft,
   ChevronRight,
+  CalendarPlus,
+  Plus,
+  Save,
+  X,
 } from "lucide-react";
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
-  const { doctors: doctorsData, specialties, loading: doctorsLoading, fetchDoctors } = useDoctors();
+  const { doctors: doctorsData, specialties, loading: doctorsLoading, fetchDoctors, fetchSpecialties } = useDoctors();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
@@ -77,6 +76,8 @@ const AdminDashboard = () => {
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [addDoctorOpen, setAddDoctorOpen] = useState(false);
+  const [editDoctorOpen, setEditDoctorOpen] = useState(false);
+  const [selectedEditDoctor, setSelectedEditDoctor] = useState<any>(null);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
@@ -86,19 +87,44 @@ const AdminDashboard = () => {
   const [selectedDoctor, setSelectedDoctor] = useState<any>(null);
   const [doctorAvailability, setDoctorAvailability] = useState<any[]>([]);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [calendarViewOpen, setCalendarViewOpen] = useState(false);
+  const [selectedCalendarDoctor, setSelectedCalendarDoctor] = useState<string | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const getWeekDateRange = (offset: number) => {
+    const today = new Date();
+    const day = today.getDay();
+    const diff = today.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is Sunday
+    const monday = new Date(today.setDate(diff + (offset * 7)));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return `${monday.toLocaleString('en-US', { month: 'short', day: 'numeric' })} - ${sunday.toLocaleString('en-US', { month: 'short', day: 'numeric' })}`;
+  };
+
   const [newAvailability, setNewAvailability] = useState({
     dayOfWeek: 'monday',
     startTime: '09:00',
     endTime: '17:00'
   });
-  
+
+  const [availabilityExceptions, setAvailabilityExceptions] = useState<any[]>([]);
+  const [showExceptionForm, setShowExceptionForm] = useState(false);
+  const [newException, setNewException] = useState({
+    date: '',
+    type: 'Exception (Different Hours)',
+    startTime: '09:00',
+    endTime: '17:00',
+    slots: [] as any[]
+  });
+
   // Specialty Management state
   const [addSpecialtyOpen, setAddSpecialtyOpen] = useState(false);
   const [editSpecialtyOpen, setEditSpecialtyOpen] = useState(false);
   const [selectedSpecialty, setSelectedSpecialty] = useState<any>(null);
   const [newSpecialty, setNewSpecialty] = useState({
     name: '',
-    description: ''
+    description: '',
+    cost: ''
   });
 
   // Admin Management state
@@ -132,7 +158,7 @@ const AdminDashboard = () => {
   // Pagination state for New Requests
   const [requestsCurrentPage, setRequestsCurrentPage] = useState(1);
   const requestsPerPage = 6; // 2 rows of 3 cards
-  
+
   // Reports state
   const [reportType, setReportType] = useState<string>('appointments');
   const [startDate, setStartDate] = useState<string>('');
@@ -144,6 +170,14 @@ const AdminDashboard = () => {
     activePatients: 0,
     completionRate: 0
   });
+
+  // Communication state
+  const [messageRecipient, setMessageRecipient] = useState<string>('');
+  const [messageType, setMessageType] = useState<'SMS' | 'Email'>('SMS');
+  const [messageContent, setMessageContent] = useState<string>('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [messageLogs, setMessageLogs] = useState<any[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
   // Chart colors
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -177,6 +211,97 @@ const AdminDashboard = () => {
       duration: "",
       durationUnit: "days"
     });
+  };
+
+  // Fetch message logs
+  const fetchMessageLogs = async () => {
+    try {
+      setLoadingMessages(true);
+      const { data, error } = await supabase
+        .from('message_logs')
+        .select(`
+              *,
+              sender:profiles!message_logs_sender_id_fkey(first_name, last_name, email)
+            `)
+        .order('sent_at', { ascending: false });
+
+      if (error) throw error;
+      setMessageLogs(data || []);
+    } catch (err: any) {
+      console.error('Error fetching message logs:', err);
+      toast({
+        title: "Error",
+        description: "Failed to load message history",
+        variant: "destructive"
+      });
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "campaigns") {
+      setIsCampaignModalOpen(false);
+    } else if (activeTab === "communication") {
+      fetchMessageLogs();
+    }
+  }, [activeTab]);
+
+  const handleSendMessage = async () => {
+    if (!messageRecipient) {
+      toast({ title: "Error", description: "Please select a recipient group", variant: "destructive" });
+      return;
+    }
+    if (!messageContent.trim()) {
+      toast({ title: "Error", description: "Message content cannot be empty", variant: "destructive" });
+      return;
+    }
+
+    try {
+      setIsSendingMessage(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const { error } = await supabase.from('message_logs').insert([{
+        sender_id: session.user.id,
+        recipient_group: messageRecipient,
+        message_type: messageType,
+        content: messageContent.trim(),
+        status: 'sent'
+      }]);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `${messageType} sent to ${messageRecipient} successfully!`
+      });
+
+      setMessageContent('');
+      setMessageRecipient('');
+
+      // Refresh logs
+      setLoadingMessages(true);
+      const { data } = await supabase
+        .from('message_logs')
+        .select(`
+          *,
+          sender:profiles!message_logs_sender_id_fkey(first_name, last_name, email)
+        `)
+        .order('sent_at', { ascending: false });
+      setMessageLogs(data || []);
+      setLoadingMessages(false);
+
+    } catch (err: any) {
+      console.error('Error sending message:', err);
+      toast({
+        title: "Error",
+        description: err.message || "Failed to send message",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSendingMessage(false);
+    }
   };
 
   // Handle campaign submission
@@ -402,11 +527,11 @@ const AdminDashboard = () => {
     const fetchNotifications = async () => {
       try {
         const notificationsList: any[] = [];
-        
+
         // 1. Get pending appointments (last 7 days)
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        
+
         const { data: pendingAppointments } = await supabase
           .from('appointments')
           .select('id, patient_id, doctor_id, type, scheduled_at, status, created_at')
@@ -491,19 +616,28 @@ const AdminDashboard = () => {
         }
 
         // Sort by time (most recent first) and limit to 15
-        notificationsList.sort((a, b) => 
+        notificationsList.sort((a, b) =>
           new Date(b.time).getTime() - new Date(a.time).getTime()
         );
-        
+
         setNotifications(notificationsList.slice(0, 15));
-        setUnreadCount(notificationsList.length);
+        
+        // Calculate unread count based on last viewed time
+        const lastViewedStr = localStorage.getItem('admin_last_viewed_notification');
+        if (lastViewedStr) {
+          const lastViewedTime = new Date(lastViewedStr).getTime();
+          const unread = notificationsList.filter(n => new Date(n.time).getTime() > lastViewedTime).length;
+          setUnreadCount(unread);
+        } else {
+          setUnreadCount(notificationsList.length);
+        }
       } catch (error) {
         console.error('Error fetching notifications:', error);
       }
     };
 
     fetchNotifications();
-    
+
     // Refresh notifications every 2 minutes
     const interval = setInterval(fetchNotifications, 120000);
     return () => clearInterval(interval);
@@ -567,7 +701,7 @@ const AdminDashboard = () => {
           doctor: d ? `Dr. ${d.full_name}` : "—",
           type: a.type,
           clinic: a.clinic ?? null,
-          scheduledDate: dt.toLocaleDateString(),
+          scheduledDate: dt.toLocaleDateString('en-US'),
           scheduledTime: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           scheduledAtISO: a.scheduled_at,
           status: a.status,
@@ -641,12 +775,29 @@ const AdminDashboard = () => {
     }).length;
   }, [appointments]);
 
+  // Today's appointments by type
+  const { todayHospitalCount, todayOnlineCount, todayHomeCount } = useMemo(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = today.getMonth();
+    const d = today.getDate();
+    const todayApts = appointments.filter((a) => {
+      const dt = new Date(a.scheduledAtISO);
+      return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+    });
+    return {
+      todayHospitalCount: todayApts.filter(a => a.type === 'hospital').length,
+      todayOnlineCount: todayApts.filter(a => a.type === 'online').length,
+      todayHomeCount: todayApts.filter(a => a.type === 'home').length,
+    };
+  }, [appointments]);
+
   // Chart data for Reports & Analytics
   const appointmentTypeData = useMemo(() => {
     const online = appointments.filter(a => a.type === 'online').length;
     const hospital = appointments.filter(a => a.type === 'hospital').length;
     const home = appointments.filter(a => a.type === 'home').length;
-    
+
     return [
       { name: 'Online Visits', value: online },
       { name: 'Hospital Visits', value: hospital },
@@ -659,7 +810,7 @@ const AdminDashboard = () => {
     const confirmed = appointments.filter(a => a.status === 'confirmed').length;
     const completed = appointments.filter(a => a.status === 'completed').length;
     const cancelled = appointments.filter(a => a.status === 'cancelled').length;
-    
+
     return [
       { name: 'Pending', value: pending },
       { name: 'Confirmed', value: confirmed },
@@ -678,57 +829,65 @@ const AdminDashboard = () => {
     }));
   }, [appointments]);
 
-  // Calculate revenue from paid online consultations
+  // Revenue state
   const [onlineRevenue, setOnlineRevenue] = useState(0);
+  const [homeRevenue, setHomeRevenue] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
   const [paidOnlineCount, setPaidOnlineCount] = useState(0);
 
   useEffect(() => {
-    const calculateOnlineRevenue = async () => {
+    const calculateRevenue = async () => {
       try {
-        // Get all paid online appointments
-        const { data: paidAppointments, error } = await supabase
+        // Fetch all paid appointments with their specialty_id and type
+        const { data: paidAppointments, error: apptError } = await supabase
           .from('appointments')
-          .select('id, doctor_id, type')
-          .eq('type', 'online')
+          .select('id, type, specialty_id')
           .eq('payment_status', 'paid');
 
-        if (error) throw error;
+        if (apptError) throw apptError;
 
-        setPaidOnlineCount(paidAppointments?.length || 0);
+        const rows = paidAppointments || [];
 
-        // Get unique doctor IDs
-        const doctorIds = Array.from(new Set(paidAppointments?.map(apt => apt.doctor_id).filter(Boolean)));
-        
-        if (doctorIds.length === 0) {
-          setOnlineRevenue(0);
-          return;
-        }
+        // Fetch specialty costs
+        const { data: specialtiesData, error: specError } = await supabase
+          .from('specialties')
+          .select('id, cost');
 
-        // Fetch consultation fees for these doctors
-        const { data: doctors, error: doctorsError } = await supabase
-          .from('doctors')
-          .select('user_id, consultation_fee')
-          .in('user_id', doctorIds);
+        if (specError) throw specError;
 
-        if (doctorsError) throw doctorsError;
-
-        // Create a map of doctor fees
-        const feeMap = new Map(doctors?.map(d => [d.user_id, d.consultation_fee || 0]) || []);
-
-        // Calculate total revenue
-        let total = 0;
-        paidAppointments?.forEach(apt => {
-          const fee = feeMap.get(apt.doctor_id) || 50; // Default fee of 50 if not set
-          total += Number(fee);
+        // Build cost lookup map
+        const costMap = new Map<string, number>();
+        (specialtiesData || []).forEach((s: any) => {
+          costMap.set(s.id, Number(s.cost) || 0);
         });
 
-        setOnlineRevenue(total);
+        // Aggregate revenue by type
+        let online = 0;
+        let home = 0;
+        let total = 0;
+        let paidOnline = 0;
+
+        rows.forEach((apt: any) => {
+          const cost = apt.specialty_id ? (costMap.get(apt.specialty_id) || 0) : 0;
+          total += cost;
+          if (apt.type === 'online') {
+            online += cost;
+            paidOnline++;
+          } else if (apt.type === 'home') {
+            home += cost;
+          }
+        });
+
+        setOnlineRevenue(online);
+        setHomeRevenue(home);
+        setTotalRevenue(total);
+        setPaidOnlineCount(paidOnline);
       } catch (error) {
-        console.error('Error calculating online revenue:', error);
+        console.error('Error calculating revenue:', error);
       }
     };
 
-    calculateOnlineRevenue();
+    calculateRevenue();
   }, [appointments]);
 
   // Calculate report statistics
@@ -737,14 +896,14 @@ const AdminDashboard = () => {
       try {
         // Total appointments
         const totalApts = appointments.length;
-        
+
         // Active patients (unique patient IDs)
         const uniquePatients = new Set(appointments.map(a => a.patientName)).size;
-        
+
         // Completion rate
         const completedCount = appointments.filter(a => a.status === 'completed').length;
         const completionRate = totalApts > 0 ? (completedCount / totalApts) * 100 : 0;
-        
+
         setReportStats({
           totalAppointments: totalApts,
           totalRevenue: onlineRevenue,
@@ -773,6 +932,9 @@ const AdminDashboard = () => {
           const itemDate = new Date(item.scheduledAtISO || item.created_at);
           const start = startDate ? new Date(startDate) : new Date(0);
           const end = endDate ? new Date(endDate) : new Date();
+          if (endDate) {
+            end.setHours(23, 59, 59, 999);
+          }
           return itemDate >= start && itemDate <= end;
         });
       };
@@ -814,8 +976,7 @@ const AdminDashboard = () => {
         case 'doctors':
           const doctorPerformance = doctorsData.map(doc => ({
             'Doctor Name': `Dr. ${doc.profiles?.full_name || 'N/A'}`,
-            'Specialty': doc.specialties?.name || 'N/A',
-            'License': doc.license_number || 'N/A',
+            'Specialties': doc.specialties?.map(s => s.name).join(', ') || 'N/A',
             'Experience': doc.years_of_experience ? `${doc.years_of_experience} years` : 'N/A',
             'Status': doc.available ? 'Available' : 'Unavailable',
             'Total Appointments': appointments.filter(a => a.doctor === `Dr. ${doc.profiles?.full_name}`).length
@@ -870,6 +1031,146 @@ const AdminDashboard = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to generate report",
+        variant: "destructive"
+      });
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  // Generate PDF report
+  const generatePDFReport = async () => {
+    setGeneratingReport(true);
+    try {
+      let data: any[] = [];
+      let headers: string[] = [];
+      let filename = '';
+      let title = '';
+
+      const filterByDateRange = (items: any[]) => {
+        if (!startDate && !endDate) return items;
+        return items.filter(item => {
+          const itemDate = new Date(item.scheduledAtISO || item.created_at);
+          const start = startDate ? new Date(startDate) : new Date(0);
+          const end = endDate ? new Date(endDate) : new Date();
+          if (endDate) {
+            end.setHours(23, 59, 59, 999);
+          }
+          return itemDate >= start && itemDate <= end;
+        });
+      };
+
+      switch (reportType) {
+        case 'appointments':
+          data = filterByDateRange(appointments).map(apt => ({
+            'Appointment ID': apt.id.slice(0, 8).toUpperCase(),
+            'Patient Name': apt.patientName,
+            'Phone': apt.phone,
+            'Doctor': apt.doctor,
+            'Type': apt.type,
+            'Clinic': apt.clinic || 'N/A',
+            'Date': apt.scheduledDate,
+            'Time': apt.scheduledTime,
+            'Status': apt.status,
+            'Payment': apt.paymentStatus,
+            'Symptoms': apt.symptoms || 'N/A',
+            'Location': apt.location || 'N/A'
+          }));
+          filename = `appointments_report_${new Date().toISOString().split('T')[0]}.pdf`;
+          title = 'Appointments Report';
+          break;
+
+        case 'revenue':
+          const revenueData = filterByDateRange(appointments)
+            .filter(a => a.paymentStatus === 'paid')
+            .map(apt => ({
+              'Date': apt.scheduledDate,
+              'Patient': apt.patientName,
+              'Doctor': apt.doctor,
+              'Type': apt.type,
+              'Clinic': apt.clinic || 'N/A',
+              'Amount': 'GHS 50.00' // Default amount
+            }));
+          data = revenueData;
+          filename = `revenue_report_${new Date().toISOString().split('T')[0]}.pdf`;
+          title = 'Revenue Report';
+          break;
+
+        case 'doctors':
+          const doctorPerformance = doctorsData.map(doc => ({
+            'Doctor Name': `Dr. ${doc.profiles?.full_name || 'N/A'}`,
+            'Specialties': doc.specialties?.map(s => s.name).join(', ') || 'N/A',
+            'Experience': doc.years_of_experience ? `${doc.years_of_experience} years` : 'N/A',
+            'Status': doc.available ? 'Available' : 'Unavailable',
+            'Total Appointments': appointments.filter(a => a.doctor === `Dr. ${doc.profiles?.full_name}`).length
+          }));
+          data = doctorPerformance;
+          filename = `doctor_performance_${new Date().toISOString().split('T')[0]}.pdf`;
+          title = 'Doctor Performance Report';
+          break;
+
+        case 'clinics':
+          const clinics = Array.from(new Set(appointments.map(a => a.clinic).filter(Boolean)));
+          const clinicData = clinics.map(clinic => ({
+            'Clinic Name': clinic,
+            'Total Appointments': appointments.filter(a => a.clinic === clinic).length,
+            'Completed': appointments.filter(a => a.clinic === clinic && a.status === 'completed').length,
+            'Pending': appointments.filter(a => a.clinic === clinic && a.status === 'pending').length,
+            'Cancelled': appointments.filter(a => a.clinic === clinic && a.status === 'cancelled').length
+          }));
+          data = clinicData;
+          filename = `clinic_analytics_${new Date().toISOString().split('T')[0]}.pdf`;
+          title = 'Clinic Analytics Report';
+          break;
+      }
+
+      if (data.length === 0) {
+        toast({
+          title: "No Data",
+          description: "No data available for the selected criteria",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      headers = Object.keys(data[0]);
+
+      // PDF Generation
+      const doc = new jsPDF('landscape');
+      
+      doc.setFontSize(18);
+      doc.text(title, 14, 22);
+      
+      let yPos = 30;
+      if (startDate || endDate) {
+        doc.setFontSize(11);
+        const dateText = `Date Range: ${startDate || 'Beginning'} to ${endDate || 'Today'}`;
+        doc.text(dateText, 14, yPos);
+        yPos += 8;
+      }
+      
+      const tableData = data.map(row => headers.map(header => row[header] || ''));
+      
+      autoTable(doc, {
+        head: [headers],
+        body: tableData,
+        startY: yPos,
+        theme: 'striped',
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [59, 130, 246] }, // tailwind blue-500
+      });
+
+      doc.save(filename);
+
+      toast({
+        title: "Success",
+        description: "PDF report generated and downloaded successfully"
+      });
+    } catch (error: any) {
+      console.error('Error generating PDF report:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to generate PDF report",
         variant: "destructive"
       });
     } finally {
@@ -978,23 +1279,23 @@ const AdminDashboard = () => {
   useEffect(() => {
     const loadSpecialtiesWithCounts = async () => {
       if (!specialties) return;
-      
+
       const specialtiesWithDoctorCounts = await Promise.all(
         specialties.map(async (specialty) => {
           const doctorCount = doctorsData.filter(
             d => d.specialty_id === specialty.id
           ).length;
-          
+
           return {
             ...specialty,
             doctorCount
           };
         })
       );
-      
+
       setSpecialtiesWithCounts(specialtiesWithDoctorCounts);
     };
-    
+
     loadSpecialtiesWithCounts();
   }, [specialties, doctorsData]);
 
@@ -1014,7 +1315,8 @@ const AdminDashboard = () => {
         .from('specialties')
         .insert([{
           name: newSpecialty.name.trim(),
-          description: newSpecialty.description.trim() || null
+          description: newSpecialty.description.trim() || null,
+          cost: newSpecialty.cost ? parseFloat(newSpecialty.cost) : null
         }]);
 
       if (error) throw error;
@@ -1024,9 +1326,10 @@ const AdminDashboard = () => {
         description: "Specialty added successfully"
       });
 
-      setNewSpecialty({ name: '', description: '' });
+      setNewSpecialty({ name: '', description: '', cost: '' });
       setAddSpecialtyOpen(false);
       fetchDoctors(); // Refresh data
+      fetchSpecialties();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -1052,7 +1355,8 @@ const AdminDashboard = () => {
         .from('specialties')
         .update({
           name: selectedSpecialty.name.trim(),
-          description: selectedSpecialty.description?.trim() || null
+          description: selectedSpecialty.description?.trim() || null,
+          cost: selectedSpecialty.cost ? parseFloat(selectedSpecialty.cost.toString()) : null
         })
         .eq('id', selectedSpecialty.id);
 
@@ -1066,6 +1370,7 @@ const AdminDashboard = () => {
       setEditSpecialtyOpen(false);
       setSelectedSpecialty(null);
       fetchDoctors(); // Refresh data
+      fetchSpecialties();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -1104,6 +1409,7 @@ const AdminDashboard = () => {
       });
 
       fetchDoctors(); // Refresh data
+      fetchSpecialties();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -1349,7 +1655,7 @@ const AdminDashboard = () => {
       if (error) throw error;
 
       // Update local state
-      setAppointments(prev => prev.map(apt => 
+      setAppointments(prev => prev.map(apt =>
         apt.id === appointmentId ? { ...apt, status: newStatus } : apt
       ));
 
@@ -1384,7 +1690,7 @@ const AdminDashboard = () => {
             doctor: d ? `Dr. ${d.full_name}` : "—",
             type: a.type,
             clinic: a.clinic ?? null,
-            scheduledDate: dt.toLocaleDateString(),
+            scheduledDate: dt.toLocaleDateString('en-US'),
             scheduledTime: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             scheduledAtISO: a.scheduled_at,
             status: a.status,
@@ -1477,7 +1783,7 @@ const AdminDashboard = () => {
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)} days ago`;
-    return past.toLocaleDateString();
+    return past.toLocaleDateString('en-US');
   };
 
   // Get icon for notification type
@@ -1605,7 +1911,7 @@ const AdminDashboard = () => {
                 {activeTab === "appointments" && "Appointments Management"}
                 {activeTab === "users" && "User Management"}
                 {/* {activeTab === "followup" && "Follow-up Queue"} */}
-               
+
                 {activeTab === "communication" && "Patient Communication"}
                 {activeTab === "reports" && "Reports & Analytics"}
               </h1>
@@ -1614,7 +1920,12 @@ const AdminDashboard = () => {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Popover>
+              <Popover onOpenChange={(open) => {
+                if (open) {
+                  localStorage.setItem('admin_last_viewed_notification', new Date().toISOString());
+                  setUnreadCount(0);
+                }
+              }}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="icon" className="relative">
                     <Bell className="w-4 h-4" />
@@ -1672,8 +1983,8 @@ const AdminDashboard = () => {
                   </ScrollArea>
                   {notifications.length > 0 && (
                     <div className="p-2 border-t">
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         className="w-full text-sm"
                         onClick={() => {
                           setNotifications([]);
@@ -1686,142 +1997,142 @@ const AdminDashboard = () => {
                   )}
                 </PopoverContent>
               </Popover>
-               {activeTab === "campaigns" && (
-                  <div className="flex items-center justify-between w-full">
-                    <span>Awareness Campaigns</span>
-                    <Dialog open={isCampaignModalOpen} onOpenChange={setIsCampaignModalOpen}>
-                      <DialogTrigger asChild>
-                        <Button size="sm" className="ml-4">
-                          <PlusCircle className="w-4 h-4 mr-2" />
-                          New Campaign
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-[600px]">
-                        <DialogHeader>
-                          <DialogTitle>Create New Awareness Campaign</DialogTitle>
-                          <DialogDescription>
-                            Fill in the details below to create a new campaign.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <form onSubmit={handleCreateCampaign}>
-                          <div className="grid gap-4 py-4">
+              {activeTab === "campaigns" && (
+                <div className="flex items-center justify-between w-full">
+                  <span>Awareness Campaigns</span>
+                  <Dialog open={isCampaignModalOpen} onOpenChange={setIsCampaignModalOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm" className="ml-4">
+                        <PlusCircle className="w-4 h-4 mr-2" />
+                        New Campaign
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[600px]">
+                      <DialogHeader>
+                        <DialogTitle>Create New Awareness Campaign</DialogTitle>
+                        <DialogDescription>
+                          Fill in the details below to create a new campaign.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleCreateCampaign}>
+                        <div className="grid gap-4 py-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="title">Title *</Label>
+                            <Input
+                              id="title"
+                              name="title"
+                              value={newCampaign.title}
+                              onChange={handleCampaignInputChange}
+                              placeholder="Enter campaign title"
+                              required
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="subtitle">Subtitle</Label>
+                            <Textarea
+                              id="subtitle"
+                              name="subtitle"
+                              value={newCampaign.subtitle}
+                              onChange={handleCampaignInputChange}
+                              placeholder="Enter a brief description"
+                              rows={3}
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="image">Campaign Image</Label>
+                            <Input
+                              id="image"
+                              name="image"
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageUpload}
+                              className="cursor-pointer"
+                            />
+                            {newCampaign.image && (
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {newCampaign.image.name}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                              <Label htmlFor="title">Title *</Label>
+                              <Label htmlFor="scheduleDate">Schedule Date *</Label>
                               <Input
-                                id="title"
-                                name="title"
-                                value={newCampaign.title}
+                                id="scheduleDate"
+                                name="scheduleDate"
+                                type="datetime-local"
+                                value={newCampaign.scheduleDate}
                                 onChange={handleCampaignInputChange}
-                                placeholder="Enter campaign title"
                                 required
                               />
                             </div>
 
-                            <div className="space-y-2">
-                              <Label htmlFor="subtitle">Subtitle</Label>
-                              <Textarea
-                                id="subtitle"
-                                name="subtitle"
-                                value={newCampaign.subtitle}
-                                onChange={handleCampaignInputChange}
-                                placeholder="Enter a brief description"
-                                rows={3}
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label htmlFor="image">Campaign Image</Label>
-                              <Input
-                                id="image"
-                                name="image"
-                                type="file"
-                                accept="image/*"
-                                onChange={handleImageUpload}
-                                className="cursor-pointer"
-                              />
-                              {newCampaign.image && (
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  {newCampaign.image.name}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-2">
                               <div className="space-y-2">
-                                <Label htmlFor="scheduleDate">Schedule Date *</Label>
+                                <Label htmlFor="duration">Duration *</Label>
                                 <Input
-                                  id="scheduleDate"
-                                  name="scheduleDate"
-                                  type="datetime-local"
-                                  value={newCampaign.scheduleDate}
+                                  id="duration"
+                                  name="duration"
+                                  type="number"
+                                  min="1"
+                                  value={newCampaign.duration}
                                   onChange={handleCampaignInputChange}
+                                  placeholder="e.g. 7"
                                   required
                                 />
                               </div>
-
-                              <div className="grid grid-cols-3 gap-2">
-                                <div className="space-y-2">
-                                  <Label htmlFor="duration">Duration *</Label>
-                                  <Input
-                                    id="duration"
-                                    name="duration"
-                                    type="number"
-                                    min="1"
-                                    value={newCampaign.duration}
-                                    onChange={handleCampaignInputChange}
-                                    placeholder="e.g. 7"
-                                    required
-                                  />
-                                </div>
-                                <div className="space-y-2">
-                                  <Label htmlFor="durationUnit">Unit</Label>
-                                  <Select
-                                    value={newCampaign.durationUnit}
-                                    onValueChange={(value) =>
-                                      setNewCampaign(prev => ({ ...prev, durationUnit: value }))
-                                    }
-                                  >
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue placeholder="Select unit" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="hours">Hours</SelectItem>
-                                      <SelectItem value="days">Days</SelectItem>
-                                      <SelectItem value="weeks">Weeks</SelectItem>
-                                      <SelectItem value="months">Months</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="durationUnit">Unit</Label>
+                                <Select
+                                  value={newCampaign.durationUnit}
+                                  onValueChange={(value) =>
+                                    setNewCampaign(prev => ({ ...prev, durationUnit: value }))
+                                  }
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select unit" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="hours">Hours</SelectItem>
+                                    <SelectItem value="days">Days</SelectItem>
+                                    <SelectItem value="weeks">Weeks</SelectItem>
+                                    <SelectItem value="months">Months</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
                             </div>
                           </div>
+                        </div>
 
-                          <DialogFooter>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => {
-                                setIsCampaignModalOpen(false);
-                                resetCampaignForm();
-                              }}
-                              disabled={isUploading}
-                            >
-                              Cancel
-                            </Button>
-                            <Button type="submit" disabled={isUploading}>
-                              {isUploading ? (
-                                <span className="flex items-center">
-                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                  Creating...
-                                </span>
-                              ) : 'Create Campaign'}
-                            </Button>
-                          </DialogFooter>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                )}
+                        <DialogFooter>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setIsCampaignModalOpen(false);
+                              resetCampaignForm();
+                            }}
+                            disabled={isUploading}
+                          >
+                            Cancel
+                          </Button>
+                          <Button type="submit" disabled={isUploading}>
+                            {isUploading ? (
+                              <span className="flex items-center">
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Creating...
+                              </span>
+                            ) : 'Create Campaign'}
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              )}
               {activeTab === "reports" && (
                 <Button onClick={generateCSVReport} disabled={generatingReport}>
                   {generatingReport ? (
@@ -1849,38 +2160,18 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        New Requests
-                      </CardTitle>
-                      <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
-                        <Clock className="w-5 h-5 text-warning" />
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{pendingAppointments.length}</div>
-                      <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Pending approval</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Confirmed Today
+                        Total Revenue
                       </CardTitle>
                       <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                        <CheckCircle className="w-5 h-5 text-success" />
+                        <DollarSign className="w-5 h-5 text-success" />
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{confirmedTodayCount}</div>
+                      <div className="text-3xl font-bold text-foreground">GHS {totalRevenue.toFixed(2)}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Confirmed appointments</span>
+                        <span className="text-muted-foreground">0 paid appointments</span>
                       </div>
                     </div>
                   </CardContent>
@@ -1889,38 +2180,65 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Completed Today
-                      </CardTitle>
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <CheckCircle className="w-5 h-5 text-primary" />
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{completedTodayCount}</div>
-                      <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Completed appointments</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Today's Appointments
+                        Home Visit Revenue
                       </CardTitle>
                       <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
-                        <Calendar className="w-5 h-5 text-accent" />
+                        <HomeIcon className="w-5 h-5 text-accent" />
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{todayAppointmentsCount}</div>
+                      <div className="text-3xl font-bold text-foreground">GHS {homeRevenue.toFixed(2)}</div>
+                      {/* <div className="flex items-center gap-1 text-sm">
+                        <span className="text-muted-foreground">Home visit revenue</span>
+                      </div> */}
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Total for today</span>
+                        <span className="text-muted-foreground">0 paid consultations</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Online Visit Revenue
+                      </CardTitle>
+                      <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+                        <DollarSign className="w-5 h-5 text-success" />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-1">
+                      <div className="text-3xl font-bold text-foreground">GHS {onlineRevenue.toFixed(2)}</div>
+                      {/* <div className="flex items-center gap-1 text-sm">
+                        <span className="text-muted-foreground">Online visit revenue</span>
+                      </div> */}
+                      <div className="flex items-center gap-1 text-sm">
+                        <span className="text-muted-foreground">{paidOnlineCount} paid consultation{paidOnlineCount !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex  items-start justify-between">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Today's Appointment
+                      </CardTitle>
+
+                      <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                        <Hospital className="w-5 h-5 text-accent" />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-1">
+                      <div className="text-3xl font-bold text-foreground">{todayHospitalCount}</div>
+                      <div className="flex items-center gap-1 text-sm">
+                        <span className="text-muted-foreground">Hospital Visit </span>
                       </div>
                     </div>
                   </CardContent>
@@ -1953,7 +2271,7 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Online Consultations
+                        Today's Appointment
                       </CardTitle>
                       <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
                         <Video className="w-5 h-5 text-warning" />
@@ -1962,11 +2280,9 @@ const AdminDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{stats.telemedicineCount}</div>
+                      <div className="text-3xl font-bold text-foreground">{todayOnlineCount}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <TrendingUp className="w-4 h-4 text-success" />
-                        <span className="text-success font-medium">↑ {stats.telemedicineTrend}%</span>
-                        <span className="text-muted-foreground">from last week</span>
+                        <span className="text-muted-foreground">Online visit</span>
                       </div>
                     </div>
                   </CardContent>
@@ -1976,18 +2292,18 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Online Revenue
+                        Today's Appointment
                       </CardTitle>
-                      <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                        <DollarSign className="w-5 h-5 text-success" />
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <HomeIcon className="w-5 h-5 text-primary" />
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">GHS {onlineRevenue.toFixed(2)}</div>
+                      <div className="text-3xl font-bold text-foreground">{todayHomeCount}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">{paidOnlineCount} paid consultation{paidOnlineCount !== 1 ? 's' : ''}</span>
+                        <span className="text-muted-foreground">Home visits today</span>
                       </div>
                     </div>
                   </CardContent>
@@ -2000,7 +2316,7 @@ const AdminDashboard = () => {
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <div>
-                        <CardTitle>New Requests for Confirmation</CardTitle>
+                        <CardTitle>Confirmed Request</CardTitle>
                         <CardDescription>
                           {pendingAppointments.length} appointment{pendingAppointments.length !== 1 ? 's' : ''} pending approval
                         </CardDescription>
@@ -2035,11 +2351,13 @@ const AdminDashboard = () => {
                             case 'home':
                               return 'Home Visit Request';
                             case 'hospital':
-                              return 'In-Person Visit Request';
+                              return 'Hospital Visit Request';
                             default:
                               return 'Appointment Request';
                           }
                         };
+
+                        const displayStatus = apt.status;
 
                         return (
                           <Card key={apt.id} className="relative">
@@ -2062,7 +2380,7 @@ const AdminDashboard = () => {
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                                   <span className="text-sm font-bold text-primary">
-                                    {apt.patientName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                    {apt.patientName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
                                   </span>
                                 </div>
                                 <div>
@@ -2072,7 +2390,7 @@ const AdminDashboard = () => {
                                   )}
                                 </div>
                               </div>
-                              
+
                               <div className="space-y-1 text-sm">
                                 {apt.doctor !== "—" && (
                                   <p className="text-muted-foreground">
@@ -2096,29 +2414,8 @@ const AdminDashboard = () => {
                               </div>
 
                               <div className="flex flex-col gap-2 pt-2 border-t">
-                                <div className="flex gap-2">
-                                  <Button
-                                    size="sm"
-                                    className="flex-1"
-                                    onClick={() => updateAppointmentStatus(apt.id, 'confirmed')}
-                                  >
-                                    <CheckCircle className="w-4 h-4 mr-2" />
-                                    Approve
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setSelectedAppointment(apt.id);
-                                      setNewStatus(apt.status);
-                                      setStatusDialogOpen(true);
-                                    }}
-                                  >
-                                    <Edit className="w-4 h-4" />
-                                  </Button>
-                                </div>
                                 <Select
-                                  value={apt.status}
+                                  value={displayStatus}
                                   onValueChange={(value) => updateAppointmentStatus(apt.id, value)}
                                 >
                                   <SelectTrigger className="w-full h-8 text-xs">
@@ -2137,7 +2434,7 @@ const AdminDashboard = () => {
                         );
                       })}
                     </div>
-                    
+
                     {pendingAppointments.length > requestsPerPage && (
                       <div className="flex items-center justify-between pt-4 border-t mt-4">
                         <Button
@@ -2212,7 +2509,7 @@ const AdminDashboard = () => {
                               </div>
                               <div>
                                 <p className="font-medium text-foreground">{`Dr. ${fullName}`}</p>
-                                <p className="text-sm text-muted-foreground">{doc.specialties?.name || ""}</p>
+                                <p className="text-sm text-muted-foreground">{doc.specialties?.map(s => s.name).join(', ') || ""}</p>
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
@@ -2441,8 +2738,17 @@ const AdminDashboard = () => {
 
               {/* Doctors Tab */}
               <TabsContent value="doctors">
-                <Tabs defaultValue="staff" className="space-y-6">
-                  <TabsList className="grid w-full max-w-md grid-cols-2">
+                {calendarViewOpen ? (
+                  <div className="h-[calc(100vh-14rem)] min-h-[600px] pb-6 animate-in fade-in duration-300">
+                    <DoctorCalendarView 
+                      onClose={() => setCalendarViewOpen(false)}
+                      selectedDoctorId={selectedCalendarDoctor}
+                      doctorsData={doctorsData}
+                    />
+                  </div>
+                ) : (
+                  <Tabs defaultValue="staff" className="space-y-6">
+                    <TabsList className="grid w-full max-w-md grid-cols-2">
                     <TabsTrigger value="staff">Medical Staff</TabsTrigger>
                     <TabsTrigger value="specialties">Specialties & Clinics</TabsTrigger>
                   </TabsList>
@@ -2463,169 +2769,175 @@ const AdminDashboard = () => {
                         </div>
                       </CardHeader>
                       <CardContent>
-                {doctorsLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  </div>
-                ) : doctorsData.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No doctors found. Add your first doctor to get started.
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Doctor</TableHead>
-                        <TableHead>Specialty</TableHead>
-                        <TableHead>Contact</TableHead>
-                        <TableHead>License</TableHead>
-                        <TableHead>Experience</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {doctorsData.map((doctor) => (
-                        <TableRow key={doctor.id}>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium text-foreground">
-                                {doctor.profiles?.full_name || 'N/A'}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">
-                              {doctor.specialties?.name || 'N/A'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              <div className="text-foreground">{doctor.profiles?.email}</div>
-                              <div className="text-muted-foreground">{doctor.profiles?.phone}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-foreground">
-                            {doctor.license_number || 'N/A'}
-                          </TableCell>
-                          <TableCell className="text-foreground">
-                            {doctor.years_of_experience ? `${doctor.years_of_experience} years` : 'N/A'}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={doctor.available ? "default" : "secondary"}>
-                              {doctor.available ? 'Available' : 'Unavailable'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-2">
-                              <Button 
-                                variant="ghost" 
-                                size="icon"
-                                onClick={() => {
-                                  setSelectedDoctor(doctor);
-                                  fetchDoctorAvailability(doctor.user_id);
-                                  setAvailabilityDialogOpen(true);
-                                }}
-                                title="Manage Availability"
-                              >
-                                <Clock className="w-4 h-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon">
-                                <Eye className="w-4 h-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon">
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteUser(doctor.user_id, 'doctor')}
-                                title="Delete Doctor"
-                              >
-                                <Trash2 className="w-4 h-4 text-destructive" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                        {doctorsLoading ? (
+                          <div className="flex items-center justify-center py-8">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                          </div>
+                        ) : doctorsData.length === 0 ? (
+                          <div className="text-center py-8 text-muted-foreground">
+                            No doctors found. Add your first doctor to get started.
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Doctor</TableHead>
+                                <TableHead>Specialty</TableHead>
+                                <TableHead>Contact</TableHead>
+                                <TableHead>Experience</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {doctorsData.map((doctor) => (
+                                <TableRow key={doctor.id}>
+                                  <TableCell>
+                                    <div>
+                                      <div className="font-medium text-foreground">
+                                        {doctor.profiles?.full_name || 'N/A'}
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline">
+                                      {doctor.specialties?.map(s => s.name).join(', ') || 'N/A'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="text-sm">
+                                      <div className="text-foreground">{doctor.profiles?.email}</div>
+                                      <div className="text-muted-foreground">{doctor.profiles?.phone}</div>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-foreground">
+                                    {doctor.years_of_experience ? `${doctor.years_of_experience} years` : 'N/A'}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant={doctor.available ? "default" : "secondary"}>
+                                      {doctor.available ? 'Available' : 'Unavailable'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => {
+                                          setSelectedCalendarDoctor(doctor.user_id);
+                                          setCalendarViewOpen(true);
+                                        }}
+                                        title="View Schedule"
+                                      >
+                                          <CalendarDays className="w-4 h-4" />
+                                        </Button>
+                                      <Button variant="ghost" size="icon" onClick={() => {
+                                        setSelectedDoctor(doctor);
+                                        setAvailabilityDialogOpen(true);
+                                      }}>
+                                        <Eye className="w-4 h-4" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" onClick={() => {
+                                        setSelectedEditDoctor(doctor);
+                                        setEditDoctorOpen(true);
+                                      }}>
+                                        <Edit className="w-4 h-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleDeleteUser(doctor.user_id, 'doctor')}
+                                        title="Delete Doctor"
+                                      >
+                                        <Trash2 className="w-4 h-4 text-destructive" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
                       </CardContent>
                     </Card>
                   </TabsContent>
 
                   {/* Specialties & Clinics Sub-Tab */}
                   <TabsContent value="specialties">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <CardTitle>Specialties & Clinics</CardTitle>
-                        <CardDescription>Manage available medical specialties</CardDescription>
-                      </div>
-                      <Button onClick={() => setAddSpecialtyOpen(true)}>
-                        <PlusCircle className="w-4 h-4 mr-2" />
-                        Add Specialty
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                {specialtiesWithCounts.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No specialties found. Add your first specialty to get started.
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Specialty Name</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Doctors</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {specialtiesWithCounts.map((specialty) => (
-                        <TableRow key={specialty.id}>
-                          <TableCell className="font-medium">{specialty.name}</TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {specialty.description || 'No description'}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{specialty.doctorCount}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => {
-                                  setSelectedSpecialty(specialty);
-                                  setEditSpecialtyOpen(true);
-                                }}
-                              >
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteSpecialty(specialty.id, specialty.doctorCount)}
-                                disabled={specialty.doctorCount > 0}
-                              >
-                                <Trash2 className="w-4 h-4 text-destructive" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-                    </CardContent>
-                  </Card>
+                    <Card>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle>Specialties & Clinics</CardTitle>
+                            <CardDescription>Manage available medical specialties</CardDescription>
+                          </div>
+                          <Button onClick={() => setAddSpecialtyOpen(true)}>
+                            <PlusCircle className="w-4 h-4 mr-2" />
+                            Add Specialty
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {specialtiesWithCounts.length === 0 ? (
+                          <div className="text-center py-8 text-muted-foreground">
+                            No specialties found. Add your first specialty to get started.
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Specialty Name</TableHead>
+                                <TableHead>Description</TableHead>
+                                <TableHead>Cost</TableHead>
+                                <TableHead>Doctors</TableHead>
+                                <TableHead>Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {specialtiesWithCounts.map((specialty) => (
+                                <TableRow key={specialty.id}>
+                                  <TableCell className="font-medium">{specialty.name}</TableCell>
+                                  <TableCell className="text-muted-foreground">
+                                    {specialty.description || 'No description'}
+                                  </TableCell>
+                                  <TableCell className="font-medium text-slate-700 dark:text-slate-300">
+                                    {specialty.cost ? `GHS ${specialty.cost}` : '—'}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline">{specialty.doctorCount}</Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => {
+                                          setSelectedSpecialty(specialty);
+                                          setEditSpecialtyOpen(true);
+                                        }}
+                                      >
+                                        <Edit className="w-4 h-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => handleDeleteSpecialty(specialty.id, specialty.doctorCount)}
+                                        disabled={specialty.doctorCount > 0}
+                                      >
+                                        <Trash2 className="w-4 h-4 text-destructive" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </CardContent>
+                    </Card>
                   </TabsContent>
                 </Tabs>
+                )}
               </TabsContent>
 
               {/* Patients Tab */}
@@ -2640,15 +2952,15 @@ const AdminDashboard = () => {
                       <div className="flex items-center gap-4">
                         <div className="relative flex-1">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                          <Input 
-                            placeholder="Search patients by name or email..." 
+                          <Input
+                            placeholder="Search patients by name or email..."
                             className="pl-9"
                             value={patientSearchQuery}
                             onChange={(e) => setPatientSearchQuery(e.target.value)}
                           />
                         </div>
                       </div>
-                      
+
                       {loadingPatients ? (
                         <div className="flex items-center justify-center py-8">
                           <Loader2 className="w-6 h-6 animate-spin text-primary" />
@@ -2710,7 +3022,7 @@ const AdminDashboard = () => {
                                       {patient.date_of_birth ? (
                                         <div>
                                           <div className="font-medium">
-                                            {new Date(patient.date_of_birth).toLocaleDateString()}
+                                            {new Date(patient.date_of_birth).toLocaleDateString('en-US')}
                                           </div>
                                           <div className="text-xs text-muted-foreground">
                                             Age: {Math.floor((new Date().getTime() - new Date(patient.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365))} years
@@ -2741,12 +3053,12 @@ const AdminDashboard = () => {
                                       )}
                                     </TableCell>
                                     <TableCell>
-                                      {patient.created_at ? new Date(patient.created_at).toLocaleDateString() : 'N/A'}
+                                      {patient.created_at ? new Date(patient.created_at).toLocaleDateString('en-US') : 'N/A'}
                                     </TableCell>
                                     <TableCell>
                                       <div className="flex gap-2">
-                                        <Button 
-                                          variant="ghost" 
+                                        <Button
+                                          variant="ghost"
                                           size="icon"
                                           onClick={() => {
                                             setSelectedPatient(patient);
@@ -2757,8 +3069,8 @@ const AdminDashboard = () => {
                                         >
                                           <Edit className="w-4 h-4" />
                                         </Button>
-                                        <Button 
-                                          variant="ghost" 
+                                        <Button
+                                          variant="ghost"
                                           size="icon"
                                           onClick={() => {
                                             // View patient appointments
@@ -2929,8 +3241,8 @@ const AdminDashboard = () => {
                         <div className="space-y-4">
                           {campaign.image_url && (
                             <div className="aspect-video w-full rounded-lg overflow-hidden bg-muted">
-                              <img 
-                                src={campaign.image_url} 
+                              <img
+                                src={campaign.image_url}
                                 alt={campaign.title}
                                 className="w-full h-full object-cover"
                               />
@@ -2940,7 +3252,7 @@ const AdminDashboard = () => {
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">Scheduled Date</span>
                               <span className="font-medium">
-                                {new Date(campaign.scheduled_date).toLocaleDateString()}
+                                {new Date(campaign.scheduled_date).toLocaleDateString('en-US')}
                               </span>
                             </div>
                             <div className="flex items-center justify-between">
@@ -2952,13 +3264,13 @@ const AdminDashboard = () => {
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">Created</span>
                               <span className="font-medium">
-                                {new Date(campaign.created_at).toLocaleDateString()}
+                                {new Date(campaign.created_at).toLocaleDateString('en-US')}
                               </span>
                             </div>
                           </div>
                           <div className="flex gap-2 pt-4 border-t">
-                            <Button 
-                              variant="outline" 
+                            <Button
+                              variant="outline"
                               className="flex-1"
                               onClick={async () => {
                                 const newStatus = campaign.status === 'active' ? 'scheduled' : 'active';
@@ -2967,7 +3279,7 @@ const AdminDashboard = () => {
                                   .update({ status: newStatus })
                                   .eq('id', campaign.id);
                                 if (!error) {
-                                  setCampaigns(campaigns.map(c => 
+                                  setCampaigns(campaigns.map(c =>
                                     c.id === campaign.id ? { ...c, status: newStatus } : c
                                   ));
                                   toast({
@@ -2989,8 +3301,8 @@ const AdminDashboard = () => {
                                 </>
                               )}
                             </Button>
-                            <Button 
-                              variant="outline" 
+                            <Button
+                              variant="outline"
                               className="flex-1"
                               onClick={() => {
                                 if (campaign.image_url) {
@@ -3022,7 +3334,7 @@ const AdminDashboard = () => {
                 <CardContent className="space-y-4">
                   <div>
                     <label className="text-sm font-medium mb-2 block">Recipients</label>
-                    <Select>
+                    <Select value={messageRecipient} onValueChange={setMessageRecipient}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select recipient group" />
                       </SelectTrigger>
@@ -3037,11 +3349,19 @@ const AdminDashboard = () => {
                   <div>
                     <label className="text-sm font-medium mb-2 block">Message Type</label>
                     <div className="flex gap-4">
-                      <Button variant="outline" className="flex-1">
+                      <Button
+                        variant={messageType === 'SMS' ? 'default' : 'outline'}
+                        className="flex-1"
+                        onClick={() => setMessageType('SMS')}
+                      >
                         <MessageSquare className="w-4 h-4 mr-2" />
                         SMS
                       </Button>
-                      <Button variant="outline" className="flex-1">
+                      <Button
+                        variant={messageType === 'Email' ? 'default' : 'outline'}
+                        className="flex-1"
+                        onClick={() => setMessageType('Email')}
+                      >
                         <Mail className="w-4 h-4 mr-2" />
                         Email
                       </Button>
@@ -3052,12 +3372,88 @@ const AdminDashboard = () => {
                     <textarea
                       className="w-full min-h-[120px] p-3 rounded-md border bg-background"
                       placeholder="Type your message here..."
+                      value={messageContent}
+                      onChange={(e) => setMessageContent(e.target.value)}
                     />
                   </div>
-                  <Button className="w-full">
-                    <Send className="w-4 h-4 mr-2" />
-                    Send Message
+                  <Button className="w-full" onClick={handleSendMessage} disabled={isSendingMessage}>
+                    {isSendingMessage ? (
+                      <span className="flex items-center">
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Sending...
+                      </span>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4 mr-2" />
+                        Send Message
+                      </>
+                    )}
                   </Button>
+                </CardContent>
+              </Card>
+
+              {/* Message History Table */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Message History</CardTitle>
+                  <CardDescription>Recent bulk messages sent</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingMessages ? (
+                    <div className="flex justify-center p-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    </div>
+                  ) : messageLogs.length === 0 ? (
+                    <div className="text-center p-8 text-muted-foreground">
+                      No messages sent yet
+                    </div>
+                  ) : (
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Sender</TableHead>
+                            <TableHead>Group</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Message</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {messageLogs.map((log) => (
+                            <TableRow key={log.id}>
+                              <TableCell className="font-medium whitespace-nowrap">
+                                {new Date(log.sent_at).toLocaleDateString('en-US')} {new Date(log.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </TableCell>
+                              <TableCell>
+                                {log.sender?.first_name} {log.sender?.last_name}
+                              </TableCell>
+                              <TableCell className="capitalize">
+                                {log.recipient_group}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={log.message_type === 'SMS' ? 'default' : 'secondary'}>
+                                  {log.message_type}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="max-w-[200px] truncate" title={log.content}>
+                                {log.content}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="capitalize">
+                                  {log.status}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -3194,7 +3590,7 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button 
+                      <Button
                         className="flex-1"
                         onClick={generateCSVReport}
                         disabled={generatingReport}
@@ -3211,15 +3607,33 @@ const AdminDashboard = () => {
                           </>
                         )}
                       </Button>
+                      <Button
+                        className="flex-1"
+                        variant="outline"
+                        onClick={generatePDFReport}
+                        disabled={generatingReport}
+                      >
+                        {generatingReport ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-4 h-4 mr-2" />
+                            Generate PDF
+                          </>
+                        )}
+                      </Button>
                     </div>
                     {(startDate || endDate) && (
                       <div className="text-sm text-muted-foreground">
                         {startDate && endDate ? (
-                          `Showing data from ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}`
+                          `Showing data from ${new Date(startDate).toLocaleDateString('en-US')} to ${new Date(endDate).toLocaleDateString('en-US')}`
                         ) : startDate ? (
-                          `Showing data from ${new Date(startDate).toLocaleDateString()} onwards`
+                          `Showing data from ${new Date(startDate).toLocaleDateString('en-US')} onwards`
                         ) : (
-                          `Showing data up to ${new Date(endDate).toLocaleDateString()}`
+                          `Showing data up to ${new Date(endDate).toLocaleDateString('en-US')}`
                         )}
                       </div>
                     )}
@@ -3261,6 +3675,13 @@ const AdminDashboard = () => {
       <AddDoctorDialog
         open={addDoctorOpen}
         onOpenChange={setAddDoctorOpen}
+        specialties={specialties}
+        onSuccess={fetchDoctors}
+      />
+      <EditDoctorDialog
+        open={editDoctorOpen}
+        onOpenChange={setEditDoctorOpen}
+        doctor={selectedEditDoctor}
         specialties={specialties}
         onSuccess={fetchDoctors}
       />
@@ -3339,6 +3760,18 @@ const AdminDashboard = () => {
                 rows={3}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="specialtyCost">Consultation Fee (GHS)</Label>
+              <Input
+                id="specialtyCost"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g., 50.00"
+                value={newSpecialty.cost}
+                onChange={(e) => setNewSpecialty({ ...newSpecialty, cost: e.target.value })}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddSpecialtyOpen(false)}>
@@ -3379,6 +3812,18 @@ const AdminDashboard = () => {
                 value={selectedSpecialty?.description || ''}
                 onChange={(e) => setSelectedSpecialty({ ...selectedSpecialty, description: e.target.value })}
                 rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="editSpecialtyCost">Consultation Fee (GHS)</Label>
+              <Input
+                id="editSpecialtyCost"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g., 50.00"
+                value={selectedSpecialty?.cost || ''}
+                onChange={(e) => setSelectedSpecialty({ ...selectedSpecialty, cost: e.target.value })}
               />
             </div>
           </div>
@@ -3552,8 +3997,8 @@ const AdminDashboard = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setEditPatientOpen(false);
                 setSelectedPatient(null);
@@ -3577,129 +4022,328 @@ const AdminDashboard = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Doctor Availability Dialog */}
-      <Dialog open={availabilityDialogOpen} onOpenChange={setAvailabilityDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              Manage Availability - Dr. {selectedDoctor?.profiles?.full_name}
-            </DialogTitle>
-            <DialogDescription>
-              Set the doctor's working hours for each day of the week
-            </DialogDescription>
-          </DialogHeader>
+      {/* Doctor Availability Slide-over Panel (Sheet) */}
+      <Sheet open={availabilityDialogOpen} onOpenChange={setAvailabilityDialogOpen}>
+        <SheetContent className="w-full max-w-[480px] sm:max-w-[480px] p-0 flex flex-col bg-[#171b24] border-l border-slate-700/50 text-slate-200">
+          <SheetHeader className="px-6 py-5 border-b border-slate-700/50 text-left shrink-0 bg-[#171b24]">
+            <SheetTitle className="text-xl font-semibold text-white tracking-tight mb-1">Doctor Availability</SheetTitle>
+            <SheetDescription className="text-base text-slate-400">
+              Manage schedule for <span className="text-slate-200 font-medium">{selectedDoctor?.profiles?.full_name}</span>
+            </SheetDescription>
+          </SheetHeader>
 
-          <div className="space-y-6 py-4">
-            {/* Current Availability */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Current Availability</h3>
-              {loadingAvailability ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                </div>
-              ) : doctorAvailability.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground border rounded-lg">
-                  No availability set. Add time slots below.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {doctorAvailability.map((slot) => (
-                    <div
-                      key={slot.id}
-                      className="flex items-center justify-between p-3 border rounded-lg bg-muted/30"
-                    >
-                      <div className="flex items-center gap-4">
-                        <Clock className="w-4 h-4 text-muted-foreground" />
-                        <div>
-                          <p className="font-medium capitalize">
-                            {slot.day_of_week}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {slot.start_time} - {slot.end_time}
-                          </p>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => deleteAvailabilitySlot(slot.id)}
-                      >
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
+          <div className="flex-1 overflow-y-auto p-6 hide-scrollbar">
+            
+            {/* Quick Status Toggle */}
+            <div className="flex items-center justify-between p-4 bg-[#1e2432] rounded-xl border border-slate-700/30 mb-8 shadow-sm">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-base font-medium text-white">Accepting Appointments</span>
+                <span className="text-sm text-slate-400">Doctor {selectedDoctor?.available ? "is currently available for booking" : "is temporarily offline"}</span>
+              </div>
+              <Switch 
+                checked={selectedDoctor?.available || false}
+                onCheckedChange={async (val) => {
+                  if (!selectedDoctor) return;
+                  try {
+                    const { error } = await supabase
+                      .from('doctors')
+                      .update({ available: val })
+                      .eq('user_id', selectedDoctor.user_id);
+                    if (error) throw error;
+                    
+                    setSelectedDoctor({ ...selectedDoctor, available: val });
+                    fetchDoctors();
+                    toast({ description: "Doctor availability status updated." });
+                  } catch (e: any) {
+                    toast({ title: "Error", description: e.message, variant: "destructive" });
+                  }
+                }}
+                className="data-[state=checked]:bg-blue-500"
+              />
             </div>
 
-            {/* Add New Availability */}
-            <div className="space-y-3 border-t pt-4">
-              <h3 className="text-sm font-semibold">Add New Time Slot</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="dayOfWeek">Day of Week</Label>
-                  <Select
-                    value={newAvailability.dayOfWeek}
-                    onValueChange={(value) =>
-                      setNewAvailability((prev) => ({ ...prev, dayOfWeek: value }))
-                    }
-                  >
-                    <SelectTrigger id="dayOfWeek">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="monday">Monday</SelectItem>
-                      <SelectItem value="tuesday">Tuesday</SelectItem>
-                      <SelectItem value="wednesday">Wednesday</SelectItem>
-                      <SelectItem value="thursday">Thursday</SelectItem>
-                      <SelectItem value="friday">Friday</SelectItem>
-                      <SelectItem value="saturday">Saturday</SelectItem>
-                      <SelectItem value="sunday">Sunday</SelectItem>
-                    </SelectContent>
-                  </Select>
+            {/* Specific Dates Section */}
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col">
+                  <h4 className="text-base font-medium text-white">Specific Dates</h4>
+                  <span className="text-sm text-slate-400">Add custom availability or exceptions</span>
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="startTime">Start Time</Label>
-                  <Input
-                    id="startTime"
-                    type="time"
-                    value={newAvailability.startTime}
-                    onChange={(e) =>
-                      setNewAvailability((prev) => ({
-                        ...prev,
-                        startTime: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="endTime">End Time</Label>
-                  <Input
-                    id="endTime"
-                    type="time"
-                    value={newAvailability.endTime}
-                    onChange={(e) =>
-                      setNewAvailability((prev) => ({
-                        ...prev,
-                        endTime: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
+                <button 
+                  onClick={() => setShowExceptionForm(true)}
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded-lg text-sm font-medium transition-colors border border-blue-500/20 shadow-sm"
+                >
+                  <CalendarPlus className="w-4 h-4" strokeWidth={1.5} />
+                  Add Date
+                </button>
               </div>
 
-              <Button onClick={addAvailabilitySlot} className="w-full">
-                <PlusCircle className="w-4 h-4 mr-2" />
-                Add Time Slot
-              </Button>
+              {showExceptionForm && (
+                <div className="p-4 bg-[#1e2432]/80 border border-blue-500/30 rounded-xl mb-4 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <h5 className="text-sm font-medium text-white">Add Specific Date</h5>
+                    <button onClick={() => setShowExceptionForm(false)} className="text-slate-400 hover:text-white transition-colors">
+                      <X className="w-4 h-4" strokeWidth={1.5} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-medium text-slate-400">Date</Label>
+                        <Input 
+                          type="date" 
+                          className="w-full bg-[#12161f] border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 [color-scheme:dark]"
+                          value={newException.date}
+                          onChange={e => setNewException({...newException, date: e.target.value})}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-medium text-slate-400">Type</Label>
+                        <Select value={newException.type} onValueChange={(val) => setNewException({...newException, type: val})}>
+                          <SelectTrigger className="w-full bg-[#12161f] border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 [color-scheme:dark]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Exception (Different Hours)">Exception (Different Hours)</SelectItem>
+                            <SelectItem value="Off Duty">Off Duty</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {newException.type !== 'Off Duty' && (
+                      <div className="flex flex-col gap-1.5">
+                        <Label className="text-xs font-medium text-slate-400">Time Slots</Label>
+                        <div className="flex items-center gap-2">
+                          <Input 
+                            type="time" 
+                            className="flex-1 bg-[#12161f] border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 [color-scheme:dark]" 
+                            value={newException.startTime}
+                            onChange={e => setNewException({...newException, startTime: e.target.value})}
+                          />
+                          <span className="text-slate-500 text-sm">to</span>
+                          <Input 
+                            type="time" 
+                            className="flex-1 bg-[#12161f] border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 [color-scheme:dark]" 
+                            value={newException.endTime}
+                            onChange={e => setNewException({...newException, endTime: e.target.value})}
+                          />
+                          <button 
+                            onClick={() => {
+                              if (newException.startTime && newException.endTime) {
+                                setNewException({
+                                  ...newException, 
+                                  slots: [...newException.slots, { start: newException.startTime, end: newException.endTime }]
+                                });
+                              }
+                            }}
+                            className="w-[38px] h-[38px] flex items-center justify-center bg-[#12161f] text-slate-300 hover:text-white hover:bg-slate-700/50 rounded-lg border border-slate-700/50 transition-colors shrink-0"
+                          >
+                            <Plus className="w-4 h-4" strokeWidth={1.5} />
+                          </button>
+                        </div>
+                        {newException.slots.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {newException.slots.map((s, i) => (
+                              <div key={i} className="group flex items-center gap-2 px-2.5 py-1.5 bg-[#12161f] border border-blue-500/30 rounded-md shadow-sm">
+                                <span className="text-sm text-slate-300">
+                                  {s.start} - {s.end}
+                                </span>
+                                <button 
+                                  onClick={() => {
+                                    const newSlots = [...newException.slots];
+                                    newSlots.splice(i, 1);
+                                    setNewException({...newException, slots: newSlots});
+                                  }}
+                                  className="text-slate-500 hover:text-[#ef4444] transition-colors"
+                                >
+                                  <X className="w-3 h-3" strokeWidth={1.5} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 pt-2">
+                      <button 
+                        onClick={() => setShowExceptionForm(false)}
+                        className="flex-1 py-2 bg-transparent border border-slate-600 text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-800 hover:text-white transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={() => {
+                          if (newException.date) {
+                            setAvailabilityExceptions([...availabilityExceptions, { ...newException, id: Date.now() }]);
+                            setShowExceptionForm(false);
+                            setNewException({
+                              date: '',
+                              type: 'Exception (Different Hours)',
+                              startTime: '09:00',
+                              endTime: '17:00',
+                              slots: []
+                            });
+                          }
+                        }}
+                        className="flex-1 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors shadow-sm"
+                      >
+                        Save Date
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Mock Exceptions List */}
+              <div className="flex flex-col gap-3">
+                {availabilityExceptions.map((exc) => (
+                  <div key={exc.id} className="flex flex-col gap-3 p-4 bg-[#1e2432]/50 border border-slate-700/30 rounded-xl">
+                    <div className="flex justify-between items-center border-b border-slate-700/50 pb-3 mb-1">
+                      <div className="flex items-center gap-3">
+                        <CalendarDays className="w-4 h-4 text-slate-400" strokeWidth={1.5} />
+                        <span className="text-base font-medium text-white">
+                          {new Date(exc.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium border ${exc.type === 'Off Duty' ? 'bg-slate-800/50 text-slate-400 border-slate-700/50' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                          {exc.type === 'Off Duty' ? 'Off Duty' : 'Exception'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {exc.type !== 'Off Duty' && (
+                          <button className="text-slate-400 hover:text-white transition-colors" title="Add Time Slot">
+                            <Plus className="w-4 h-4" strokeWidth={1.5} />
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => setAvailabilityExceptions(availabilityExceptions.filter(e => e.id !== exc.id))}
+                          className="text-slate-400 hover:text-[#ef4444] transition-colors" title="Remove Date"
+                        >
+                          <Trash2 className="w-4 h-4" strokeWidth={1.5} />
+                        </button>
+                      </div>
+                    </div>
+                    {exc.type !== 'Off Duty' && (
+                      <div className="flex flex-wrap gap-2">
+                        {exc.slots.map((s: any, i: number) => (
+                          <div key={i} className="group flex items-center gap-2 px-3 py-2 bg-[#12161f] border border-slate-700/50 rounded-lg shadow-sm">
+                            <span className="text-base text-slate-300">
+                              {s.start} - {s.end}
+                            </span>
+                            <button className="text-slate-500 opacity-0 group-hover:opacity-100 hover:text-[#ef4444] transition-all">
+                              <X className="w-3.5 h-3.5" strokeWidth={1.5} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
+
+            {/* Weekly Schedule Header */}
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="text-base font-medium text-white">Weekly Schedule</h4>
+              
+              {/* Week Navigation */}
+              <div className="flex items-center gap-2 bg-[#12161f] p-1 rounded-lg border border-slate-700/50 shadow-sm">
+                <button 
+                  onClick={() => setWeekOffset(prev => prev - 1)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-700/50 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" strokeWidth={1.5} />
+                </button>
+                <span className="text-sm font-medium text-slate-300 px-2 whitespace-nowrap">
+                  {getWeekDateRange(weekOffset)}
+                </span>
+                <button 
+                  onClick={() => setWeekOffset(prev => prev + 1)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-700/50 transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
+                </button>
+              </div>
+            </div>
+
+            {/* Days List */}
+            <div className="space-y-4">
+              {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(day => {
+                const daySlots = doctorAvailability.filter(slot => slot.day_of_week === day);
+                
+                // Helper to parse 24h format to 12h
+                const formatTime = (time24: string) => {
+                  const [h, m] = time24.split(':');
+                  const hours = parseInt(h);
+                  const period = hours >= 12 ? 'PM' : 'AM';
+                  const h12 = hours % 12 || 12;
+                  return `${h12.toString().padStart(2, '0')}:${m} ${period}`;
+                };
+
+                // Calculate total hours
+                let totalMin = 0;
+                daySlots.forEach(slot => {
+                  const [sH, sM] = slot.start_time.split(':').map(Number);
+                  const [eH, eM] = slot.end_time.split(':').map(Number);
+                  totalMin += (eH * 60 + eM) - (sH * 60 + sM);
+                });
+                const hoursText = totalMin > 0 ? `${(totalMin / 60).toFixed(0)} Hours` : 'Off Duty';
+
+                return (
+                  <div key={day} className="flex flex-col gap-3 p-4 bg-[#12161f]/50 border border-slate-700/30 rounded-xl">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <span className={`text-base font-medium w-24 capitalize ${daySlots.length > 0 ? 'text-white' : 'text-slate-400'}`}>
+                          {day}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${daySlots.length > 0 ? 'bg-blue-500/10 text-blue-400' : 'bg-slate-800 text-slate-400'}`}>
+                          {hoursText}
+                        </span>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setNewAvailability({ ...newAvailability, dayOfWeek: day });
+                          // Typically this would open an inline form or dialog for this specific day
+                          addAvailabilitySlot(); // Simple call since we don't have a UI specific for inline addition in the mock yet
+                        }}
+                        className="text-slate-400 hover:text-slate-200 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" strokeWidth={1.5} />
+                      </button>
+                    </div>
+                    {daySlots.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {daySlots.map(slot => (
+                          <div key={slot.id} className="group flex items-center gap-2 px-3 py-2 bg-[#1e2432] border border-slate-700/50 rounded-lg shadow-sm">
+                            <span className="text-base text-slate-300">
+                              {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                            </span>
+                            <button 
+                              onClick={() => deleteAvailabilitySlot(slot.id)}
+                              className="text-slate-500 opacity-0 group-hover:opacity-100 hover:text-[#ef4444] transition-all"
+                            >
+                              <X className="w-3.5 h-3.5" strokeWidth={1.5} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex">
+                        <span className="text-base text-slate-500 italic">No time slots configured.</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
           </div>
 
-          <DialogFooter>
-            <Button
-              variant="outline"
+          <div className="p-6 border-t border-slate-700/50 bg-[#171b24] flex gap-4 shrink-0">
+            <button
+              className="flex-1 py-2.5 bg-transparent border border-slate-600 text-slate-300 rounded-xl font-medium text-base hover:bg-slate-800 hover:text-white transition-colors shadow-sm"
               onClick={() => {
                 setAvailabilityDialogOpen(false);
                 setSelectedDoctor(null);
@@ -3707,10 +4351,17 @@ const AdminDashboard = () => {
               }}
             >
               Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </button>
+            <button
+              className="flex-1 py-2.5 bg-[#3b82f6] text-white rounded-xl font-medium text-base hover:bg-blue-600 transition-colors shadow-sm flex items-center justify-center gap-2"
+              onClick={() => setAvailabilityDialogOpen(false)}
+            >
+              <Save className="w-4 h-4" strokeWidth={1.5} />
+              Save Changes
+            </button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

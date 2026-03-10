@@ -129,3 +129,17 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom hide scrollbar utility */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Custom Radio styling for selection grids */
+input[type="radio"]:checked + div {
+  border-color: #0f172a;
+  background-color: #0f172a;
+  color: #ffffff;
+}
+input[type="radio"]:checked + div .text-slate-500 {
+  color: #cbd5e1;
+}

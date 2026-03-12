@@ -11,6 +11,7 @@ import { PatientBookingModal } from "@/components/patient-dashboard/PatientBooki
 import { FertilityIntakeForm } from "@/components/patient-dashboard/FertilityIntakeForm";
 
 import { CheckCircle, XCircle, AlertCircle, Bell, ClipboardList, Calendar } from "lucide-react";
+import { Icon } from '@iconify/react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -327,13 +328,13 @@ const PatientDashboard = () => {
       if (notification.type === 'form_pending') {
          return (
            <div className="w-8 h-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
-             <ClipboardList className="w-4 h-4" strokeWidth={2} />
+             <Icon icon="solar:clipboard-text-bold" className="text-lg" />
            </div>
          );
       } else {
          return (
            <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-             <CheckCircle className="w-4 h-4" strokeWidth={2} />
+             <Icon icon="solar:check-circle-bold" className="text-lg" />
            </div>
          );
       }
@@ -343,31 +344,31 @@ const PatientDashboard = () => {
       case 'confirmed': 
         return (
           <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-            <Calendar className="w-4 h-4" strokeWidth={2} />
+            <Icon icon="solar:calendar-bold" className="text-lg" />
           </div>
         );
       case 'cancelled': 
         return (
           <div className="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
-            <XCircle className="w-4 h-4" strokeWidth={2} />
+            <Icon icon="solar:close-circle-bold" className="text-lg" />
           </div>
         );
       case 'completed': 
         return (
           <div className="w-8 h-8 rounded-full bg-green-50 text-green-600 flex items-center justify-center shrink-0">
-            <CheckCircle className="w-4 h-4" strokeWidth={2} />
+            <Icon icon="solar:bill-bold" className="text-lg" />
           </div>
         );
       case 'pending': 
         return (
           <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-4 h-4" strokeWidth={2} />
+            <Icon icon="solar:clock-circle-bold" className="text-lg" />
           </div>
         );
       default: 
         return (
           <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
-             <Bell className="w-4 h-4" strokeWidth={2} />
+             <Icon icon="solar:bell-bold" className="text-lg" />
           </div>
         );
     }

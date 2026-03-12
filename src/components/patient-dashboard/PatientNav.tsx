@@ -70,40 +70,42 @@ export const PatientNav = ({
                                 )}
                             </button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-80 p-0 rounded-2xl border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden" align="end">
-                            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
-                                <h3 className="text-sm font-medium tracking-tight text-slate-900 dark:text-white">
+                        <PopoverContent className="w-80 p-0 rounded-2xl border-slate-200 shadow-xl overflow-hidden bg-white" align="end">
+                            <div className="px-5 py-3 border-b border-slate-100 flex justify-between items-center bg-white">
+                                <h3 className="text-[15px] font-semibold tracking-tight text-slate-900">
                                     Notifications
                                 </h3>
                                 {notifications.length > 0 && (
                                     <button
                                         onClick={onMarkAllRead}
-                                        className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium transition-colors"
+                                        className="text-[13px] text-blue-600 hover:text-blue-700 font-medium transition-colors"
                                     >
                                         Mark all as read
                                     </button>
                                 )}
                             </div>
-                            <ScrollArea className="max-h-80 w-full hide-scrollbar">
+                            <div className="max-h-[22rem] w-full overflow-y-auto hide-scrollbar">
                                 {notifications.length === 0 ? (
                                     <div className="p-8 text-center flex flex-col items-center">
-                                        <Bell className="w-8 h-8 text-slate-300 dark:text-slate-600 mb-3" />
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">No notifications yet</p>
+                                        <Bell className="w-8 h-8 text-slate-300 mb-3" />
+                                        <p className="text-sm text-slate-500">No notifications yet</p>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col">
                                         {notifications.map((notification) => (
                                             <div
                                                 key={notification.id}
-                                                className="p-4 border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer flex gap-3"
+                                                className={`p-5 px-6 border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer flex gap-4 ${
+                                                    ['completed', 'form_completed', 'cancelled'].includes(notification.type) ? 'opacity-60' : ''
+                                                }`}
                                                 onClick={() => onNotificationClick(notification)}
                                             >
                                                 <div className="mt-0.5 shrink-0">
                                                     {getNotificationIcon(notification)}
                                                 </div>
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-sm text-slate-900 dark:text-slate-100 font-medium tracking-tight">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <p className="text-[15px] text-slate-900 font-medium tracking-tight">
                                                             {notification.title || (
                                                                 notification.type === 'confirmed' ? 'Appointment confirmed' :
                                                                 notification.type === 'cancelled' ? 'Appointment cancelled' :
@@ -113,15 +115,15 @@ export const PatientNav = ({
                                                             )}
                                                         </p>
                                                         {notification.isForm && notification.type === 'form_pending' && (
-                                                            <span className="px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[10px] font-medium tracking-wide">
-                                                                ACTION
+                                                            <span className="px-1.5 py-0.5 bg-red-100/80 text-red-600 rounded text-[11px] font-medium tracking-wide uppercase">
+                                                                Action
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                                                    <p className="text-[13px] text-slate-500 mt-0.5 leading-[1.45]">
                                                         {notification.message}
                                                     </p>
-                                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 font-medium uppercase tracking-wider">
+                                                    <p className="text-[11px] text-slate-400 mt-2 font-medium uppercase tracking-wider">
                                                         {formatRelativeTime(notification.time)}
                                                     </p>
                                                 </div>
@@ -129,10 +131,10 @@ export const PatientNav = ({
                                         ))}
                                     </div>
                                 )}
-                            </ScrollArea>
+                            </div>
                             {notifications.length > 0 && (
-                                <div className="p-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                                    <button className="w-full py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
+                                <div className="p-3 bg-white flex justify-center border-t border-slate-100">
+                                    <button className="text-[14px] font-medium text-slate-600 hover:text-slate-900 transition-colors">
                                         View all notifications
                                     </button>
                                 </div>

@@ -687,11 +687,9 @@ const DoctorDashboard = () => {
       {/* Header */}
       <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center">
-              <Hospital className="w-6 h-6 text-primary-foreground" />
-            </div>
-            <span className="text-xl font-bold text-foreground">St Gameliel's Hospital</span>
+          <div className="flex items-center gap-3">
+            <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm" />
+            <span className="text-xl font-bold text-foreground">St. Gamaliel's Hospital</span>
           </div>
           <div className="flex items-center gap-3">
             <ThemeSwitcher />
@@ -833,7 +831,7 @@ const DoctorDashboard = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today's Revenue</p>
-                  <h3 className="text-3xl font-bold text-success">$4,250</h3>
+                  <h3 className="text-3xl font-bold text-success">GHS 4,250</h3>
                 </div>
                 <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center">
                   <DollarSign className="w-6 h-6 text-success" />
@@ -1380,15 +1378,15 @@ const DoctorDashboard = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Today:</span>
-                    <span className="font-semibold">$4,250</span>
+                    <span className="font-semibold">GHS 4,250</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">This Week:</span>
-                    <span className="font-semibold">$18,900</span>
+                    <span className="font-semibold">GHS 18,900</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">This Month:</span>
-                    <span className="font-semibold text-primary">$72,450</span>
+                    <span className="font-semibold text-primary">GHS 72,450</span>
                   </div>
                 </div>
               </CardContent>

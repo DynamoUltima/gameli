@@ -36,13 +36,11 @@ export const PatientNav = ({
                 {/* Logo and Navigation */}
                 <div className="flex items-center gap-6">
                     <div
-                        className="flex items-center gap-2 text-slate-900 dark:text-white group cursor-pointer"
+                        className="flex items-center gap-3 text-slate-900 dark:text-white group cursor-pointer"
                         onClick={() => window.location.href = '/'}
                     >
-                        <div className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 p-1.5 rounded-lg group-hover:rotate-12 transition-transform duration-300 flex items-center justify-center">
-                            <HeartPulse className="w-5 h-5" strokeWidth={1.5} />
-                        </div>
-                        <span className="text-xl font-medium tracking-tight">Gameli Hospital</span>
+                        <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-8 h-8 rounded-md shadow-sm group-hover:scale-105 transition-transform duration-300 object-contain" />
+                        <span className="text-xl font-medium tracking-tight">St. Gamaliel Hospital</span>
                     </div>
 
                     <div className="hidden md:flex items-center gap-4 text-sm font-medium text-slate-500 dark:text-slate-400">

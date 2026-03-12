@@ -8,7 +8,7 @@ export function LandingFooter() {
                     <div className="lg:col-span-4 flex flex-col gap-6">
                         <a href="#" className="flex items-center gap-2 text-white group w-fit">
                             <Sparkles className="w-6 h-6 group-hover:rotate-45 transition-transform duration-500 stroke-[1.5px]" />
-                            <span className="text-xl font-medium tracking-tight">Gameli</span>
+                            <span className="text-xl font-medium tracking-tight">St. Gamaliel</span>
                         </a>
                         <p className="text-white/70 text-base font-normal leading-relaxed max-w-sm">
                             Expert medical care for healthy, confident lives at every
@@ -45,7 +45,7 @@ export function LandingFooter() {
                     </div>
                     <div className="lg:col-span-2 flex flex-col gap-4">
                         <h4 className="text-xs font-semibold text-white tracking-widest uppercase mb-2">
-                            Gameli
+                            St. Gamaliel
                         </h4>
                         <a href="#" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
                             About Us
@@ -74,7 +74,7 @@ export function LandingFooter() {
                 </div>
                 <div className="w-full h-px bg-white/10"></div>
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-white/50 text-xs font-medium">
-                    <p>© 2024 Gameli Hospital. All rights reserved.</p>
+                    <p>© 2024 St. Gamaliel Hospital. All rights reserved.</p>
                     <div className="flex items-center gap-6">
                         <a href="#" className="hover:text-white transition-colors">Terms</a>
                         <a href="#" className="hover:text-white transition-colors">Privacy</a>

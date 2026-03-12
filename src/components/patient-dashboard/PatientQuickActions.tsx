@@ -33,7 +33,7 @@ export const PatientQuickActions = ({ onOpenBooking }: PatientQuickActionsProps)
                 </div>
                 <div>
                     <h3 className="text-base font-medium text-slate-900 dark:text-slate-100 tracking-tight">
-                        Clinic Visit
+                        Hospital Visit
                     </h3>
                     <p className="text-sm font-normal text-slate-500 dark:text-slate-400 mt-0.5">
                         In-person care

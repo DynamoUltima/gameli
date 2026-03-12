@@ -1,20 +1,50 @@
 import { Sparkles, ChevronDown, Stethoscope, HeartPulse, AlertCircle, ArrowRight, UserCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 
 interface Props {
   onBookClick: (title: string, img: string) => void;
   onContactClick: () => void;
   isServicesMenuOpen: boolean;
   toggleServicesMenu: (e: React.MouseEvent) => void;
+  activeCampaign?: any;
 }
 
-export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, toggleServicesMenu }: Props) {
+export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, toggleServicesMenu, activeCampaign }: Props) {
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  const slides = [
+    {
+      title: "Modern\nHealthcare With\nGentle Care.",
+      subtitle: "Expert medical care for healthy, confident lives at every age—delivered with comfort, precision, and trust.",
+      image: "/uploaded-banner.jpg"
+    }
+  ];
+
+  if (activeCampaign) {
+    slides.push({
+      title: activeCampaign.title || "Awareness Campaign",
+      subtitle: activeCampaign.subtitle || "Learn more about our latest healthcare initiative.",
+      image: activeCampaign.image_url || "/uploaded-banner.jpg"
+    });
+  }
+
+  useEffect(() => {
+    if (slides.length <= 1) return;
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % slides.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [slides.length]);
+
+  const activeSlide = slides[currentSlide];
+
   return (
     <div className="p-3 sm:p-6 lg:p-8">
       <div
-        className="relative w-full rounded-[2.5rem] overflow-hidden min-h-[85vh] flex flex-col justify-between p-6 sm:p-10 lg:p-12"
+        className="relative w-full rounded-[2.5rem] overflow-hidden min-h-[85vh] flex flex-col justify-between p-6 sm:p-10 lg:p-12 transition-all duration-700"
         style={{
-          backgroundImage: "url('https://images.unsplash.com/photo-1586773860418-d37222d8fce3?auto=format&fit=crop&q=80&w=2070')",
+          backgroundImage: `url('${activeSlide.image}')`,
           backgroundSize: 'cover',
           backgroundPosition: 'center 30%'
         }}
@@ -26,9 +56,9 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
         {/* Navigation inside Hero */}
         <nav className="relative z-50 flex flex-wrap items-center justify-between w-full gap-4">
           {/* Logo */}
-          <a href="#" className="flex items-center gap-2 text-white group">
-            <Sparkles className="w-6 h-6 group-hover:rotate-45 transition-transform duration-500 stroke-[1.5px]" />
-            <span className="text-xl font-medium tracking-tight">Gameli</span>
+          <a href="#" className="flex items-center gap-3 text-white group">
+            <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-full shadow-md group-hover:scale-110 transition-transform duration-500" />
+            <span className="text-xl font-medium tracking-tight">St. Gamaliel</span>
           </a>
 
           {/* Desktop Links */}
@@ -137,8 +167,6 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
               </div>
             </div>
             <a href="#about" className="text-base font-normal text-white/80 hover:text-white transition-colors">About us</a>
-            <a href="#" className="text-base font-normal text-white/80 hover:text-white transition-colors">Testimonials</a>
-            <a href="#" className="text-base font-normal text-white/80 hover:text-white transition-colors">Blog</a>
             <button onClick={onContactClick} className="text-base font-normal text-white/80 hover:text-white transition-colors">Contact</button>
           </div>
 
@@ -161,18 +189,13 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
         </nav>
 
         {/* Hero Main Text */}
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-end mt-24 md:mt-0 md:absolute md:top-1/2 md:-translate-y-1/2 left-6 sm:left-10 lg:left-12 right-6 sm:right-10 lg:right-12">
-          <h1 className="text-5xl sm:text-7xl lg:text-8xl font-medium text-white tracking-tighter leading-[1.05] uppercase max-w-3xl drop-shadow-sm">
-            Modern
-            <br />
-            Healthcare With
-            <br />
-            Gentle Care.
+        <div key={currentSlide} className="relative z-10 flex flex-col md:flex-row justify-between items-end mt-24 md:mt-0 md:absolute md:top-1/2 md:-translate-y-1/2 left-6 sm:left-10 lg:left-12 right-6 sm:right-10 lg:right-12 animate-fade-in">
+          <h1 className="text-5xl sm:text-7xl lg:text-8xl font-medium text-white tracking-tighter leading-[1.05] uppercase max-w-3xl drop-shadow-sm whitespace-pre-line">
+            {activeSlide.title}
           </h1>
           <div className="max-w-xs mt-8 md:mt-0 text-white md:pb-6">
             <p className="text-lg font-normal leading-relaxed text-white/90 drop-shadow-sm">
-              Expert medical care for healthy, confident lives at every
-              age—delivered with comfort, precision, and trust.
+              {activeSlide.subtitle}
             </p>
           </div>
         </div>
@@ -202,13 +225,22 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
           <div className="flex flex-col items-end gap-6 w-full lg:w-auto">
             {/* Pagination */}
             <div className="flex items-center gap-4 text-white/80 text-sm font-medium tracking-tight">
-              <button className="hover:text-white transition-colors">&lt;</button>
-              <span>01</span>
+              <button 
+                className="hover:text-white transition-colors"
+                onClick={() => setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length)}
+              >&lt;</button>
+              <span>0{currentSlide + 1}</span>
               <div className="w-16 h-0.5 bg-white/30 rounded-full overflow-hidden">
-                <div className="w-1/5 h-full bg-white rounded-full"></div>
+                <div 
+                  className="h-full bg-white rounded-full transition-all duration-500" 
+                  style={{ width: `${((currentSlide + 1) / slides.length) * 100}%` }}
+                ></div>
               </div>
-              <span>05</span>
-              <button className="hover:text-white transition-colors">&gt;</button>
+              <span>0{slides.length}</span>
+              <button 
+                className="hover:text-white transition-colors"
+                onClick={() => setCurrentSlide((prev) => (prev + 1) % slides.length)}
+              >&gt;</button>
             </div>
 
             {/* Doctor Card */}

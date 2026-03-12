@@ -59,7 +59,7 @@ export function LandingServices({ onBookClick }: Props) {
                 <div className="lg:col-span-8 flex flex-col justify-between">
                     <p className="text-xl font-normal text-slate-600 max-w-xl mb-12 lg:ml-auto leading-relaxed tracking-tight">
                         Experience modern medical care delivered with comfort, precision, and
-                        attention to detail. Gameli Hospital provides a state-of-the-art, welcoming
+                        attention to detail. St. Gamaliel Hospital provides a state-of-the-art, welcoming
                         environment designed to promote rapid recovery and well-being.
                     </p>
 

@@ -21,10 +21,12 @@ export function LandingContactModal({ isOpen, onClose }: Props) {
 
     return (
         <div
+            onClick={handleClose}
             className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center transition-opacity duration-300 p-4 sm:p-6 ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
                 }`}
         >
             <div
+                onClick={(e) => e.stopPropagation()}
                 className={`bg-white rounded-[2.5rem] w-full max-w-4xl shadow-2xl transform flex flex-col md:flex-row max-h-[90vh] overflow-hidden relative border border-slate-100 transition-transform duration-300 ${isOpen ? 'scale-100' : 'scale-95'
                     }`}
             >

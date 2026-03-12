@@ -13,6 +13,7 @@ import {
     ArrowRight
 } from 'lucide-react';
 import { useDoctors } from '@/hooks/useDoctors';
+import { useDoctorSchedules } from '@/hooks/useDoctorSchedules';
 import { Calendar } from "@/components/ui/calendar";
 import { supabase } from "@/integrations/supabase/client";
 import { format, parse, addMinutes, isBefore, isSameDay, startOfDay } from "date-fns";
@@ -50,8 +51,10 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
     const { toast } = useToast();
 
     const { doctors, specialties, loading } = useDoctors();
+    const { getAvailableSlots } = useDoctorSchedules();
 
     const selectedSpecialty = specialties.find(s => s.id === clinic);
+    const amountToPay = selectedSpecialty?.cost || (bookingType === 'hospital' ? 144 : bookingType === 'online' ? 45 : 0);
     const isFertility = selectedSpecialty?.name?.toLowerCase().includes('fertility');
     const filteredDoctors = doctors.filter(doc => doc.specialties?.some(s => s.id === clinic) && doc.available);
 
@@ -87,55 +90,30 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
     }, [preferredDoctor, toast]);
 
     useEffect(() => {
-        if (!selectedDate || availabilitySlots.length === 0) {
-            setAvailableTimes([]);
-            setSelectedTime('');
-            return;
-        }
-
-        const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const dayOfWeek = format(selectedDate, 'EEEE').toLowerCase();
-
-        // Find relevant slots: either specific to this date, or matching the day of the week
-        const slots = availabilitySlots.filter(slot => 
-            slot.date === dateStr || (!slot.date && slot.day_of_week === dayOfWeek)
-        );
-
-        if (slots.length === 0) {
-            setAvailableTimes([]);
-            setSelectedTime('');
-            return;
-        }
-
-        // Generate 30-minute intervals for all matched slots
-        const times: string[] = [];
-        const now = new Date();
-        const isToday = isSameDay(selectedDate, now);
-
-        slots.forEach(slot => {
-            let current = parse(slot.start_time, 'HH:mm:ss', selectedDate);
-            const end = parse(slot.end_time, 'HH:mm:ss', selectedDate);
-
-            while (isBefore(current, end)) {
-                // If the selected date is today, only add times in the future
-                if (!isToday || isBefore(now, current)) {
-                    times.push(format(current, 'hh:mm a'));
-                }
-                current = addMinutes(current, 30);
+        const fetchTimes = async () => {
+            if (!selectedDate || !preferredDoctor) {
+                setAvailableTimes([]);
+                setSelectedTime('');
+                return;
             }
-        });
+            try {
+                const slots = await getAvailableSlots(preferredDoctor, selectedDate);
+                const formattedTimes = slots.map(slot => format(new Date(slot), 'hh:mm a'));
+                
+                setAvailableTimes(formattedTimes);
+                if (selectedTime && !formattedTimes.includes(selectedTime)) {
+                    setSelectedTime(''); 
+                }
+            } catch (error) {
+                console.error("Error fetching available times:", error);
+                setAvailableTimes([]);
+                setSelectedTime('');
+            }
+        };
 
-        // Remove duplicates and sort if necessary
-        const uniqueTimes = Array.from(new Set(times)).sort((a, b) => {
-            return parse(a, 'hh:mm a', new Date()).getTime() - parse(b, 'hh:mm a', new Date()).getTime();
-        });
-
-        setAvailableTimes(uniqueTimes);
-        // Reset selected time when date changes if the previous time is no longer available
-        if (selectedTime && !uniqueTimes.includes(selectedTime)) {
-            setSelectedTime(''); 
-        }
-    }, [selectedDate, availabilitySlots]);
+        fetchTimes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedDate, preferredDoctor, getAvailableSlots]);
 
     const handleNextClick = () => {
         if (currentStep === 1) {
@@ -431,7 +409,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                                         >
                                             <option value="" disabled>{loading ? 'Loading doctors...' : 'Select a doctor...'}</option>
                                             {filteredDoctors.map(doc => (
-                                                <option key={doc.id} value={doc.id}>
+                                                <option key={doc.user_id} value={doc.user_id}>
                                                     {doc.profiles?.full_name || 'Unknown Doctor'}
                                                 </option>
                                             ))}
@@ -476,12 +454,28 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                                     <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wide">
                                         Select a Date
                                     </h4>
-                                    <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 flex justify-center shadow-sm">
+                                    <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 flex justify-center shadow-sm text-slate-900 dark:text-slate-100 relative min-h-[320px]">
+                                        {loadingAvailability && (
+                                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm rounded-2xl">
+                                                <div className="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400">
+                                                    <div className="animate-spin text-slate-900 dark:text-white rounded-full h-8 w-8 border-b-2 border-current mb-2"></div>
+                                                    <span className="text-sm font-medium">Checking calendar...</span>
+                                                </div>
+                                            </div>
+                                        )}
                                         <Calendar
                                             mode="single"
                                             selected={selectedDate}
                                             onSelect={setSelectedDate}
                                             className="rounded-md pointer-events-auto"
+                                            classNames={{
+                                                caption_label: "text-black dark:text-white font-semibold text-sm",
+                                                nav_button: "border border-slate-200 dark:border-slate-800 bg-transparent p-1 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors",
+                                                day: "h-9 w-9 p-0 font-normal text-slate-900 dark:text-white rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 aria-selected:opacity-100",
+                                                day_disabled: "text-slate-400 dark:text-slate-600 opacity-50 pointer-events-none",
+                                                day_outside: "day-outside text-slate-400 dark:text-slate-600 opacity-30",
+                                                head_cell: "text-slate-500 dark:text-slate-400 rounded-md w-9 font-normal text-[0.8rem]"
+                                            }}
                                             disabled={(date) => {
                                                 const today = startOfDay(new Date());
                                                 if (isBefore(date, today)) return true;
@@ -537,7 +531,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                         <div className="space-y-8 animate-fade-in flex flex-col">
                             <div>
                                 <h3 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white mb-1">
-                                    Confirmation & Payment
+                                    {bookingType === 'hospital' ? 'Confirmation' : 'Confirmation & Payment'}
                                 </h3>
                                 <p className="text-slate-500 dark:text-slate-400 font-normal mt-4 text-sm sm:text-base px-2">
                                     Your appointment has been confirmed for {selectedDate ? format(selectedDate, 'MMMM do') : ''} at {selectedTime}. You'll receive a confirmation email shortly.
@@ -557,13 +551,21 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                                 </div>
                                 <div className="flex justify-between items-center pt-2">
                                     <span className="text-base font-medium text-slate-900 dark:text-white">Total</span>
-                                    <span className="text-xl font-medium text-slate-900 dark:text-white tracking-tight">$75.00</span>
+                                    <span className="text-xl font-medium text-slate-900 dark:text-white tracking-tight">{amountToPay} GHS</span>
                                 </div>
                             </div>
 
                             <form id="paymentForm" className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleNextClick(); }}>
-                                <div className="space-y-4 mb-6">
-                                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Payment Method</label>
+                                {bookingType === 'hospital' ? (
+                                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 p-4 rounded-xl">
+                                        <p className="text-sm text-amber-800 dark:text-amber-300">
+                                            <strong>Note:</strong> Our admin team will contact you shortly to confirm the appointment. Payment will be completed at the hospital.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="space-y-4 mb-6">
+                                            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Payment Method</label>
                                     <div className="grid grid-cols-2 gap-3">
                                         <label className="cursor-pointer">
                                             <input type="radio" name="paymentMethod" value="mobile" checked={paymentMethod === 'mobile'} onChange={() => setPaymentMethod('mobile')} className="peer sr-only" />
@@ -584,7 +586,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                                     <div className="space-y-4 animate-fade-in">
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Mobile Money Number</label>
-                                            <input type="tel" required placeholder="e.g. 024XXXXXXX" className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm" />
+                                            <input type="tel" required placeholder="e.g. 024XXXXXXX" pattern="[0-9]*" onChange={(e) => { e.target.value = e.target.value.replace(/\D/g, ''); }} className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm" />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Network Provider</label>
@@ -605,6 +607,8 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                                             <input type="text" required placeholder="CVC" className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm" />
                                         </div>
                                     </div>
+                                )}
+                                    </>
                                 )}
                                 <button type="submit" className="hidden"></button>
                             </form>
@@ -632,7 +636,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
 
                                 <div className="text-center mb-6 pb-6 border-b border-dashed border-slate-300 dark:border-slate-700 relative z-0">
                                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Receipt</p>
-                                    <p className="text-3xl font-medium text-slate-900 dark:text-white tracking-tight">$75.00</p>
+                                    <p className="text-3xl font-medium text-slate-900 dark:text-white tracking-tight">{amountToPay} GHS</p>
                                 </div>
 
                                 <div className="space-y-4 mb-8 relative z-0">
@@ -688,7 +692,8 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                             <span>
                                 {currentStep === 1 ? 'Next: Medical Details' :
                                     currentStep === 2 ? 'Next: Select Date' :
-                                        currentStep === 3 ? 'Next: Payment' : 'Pay & Confirm'}
+                                        currentStep === 3 ? (bookingType === 'hospital' ? 'Next: Confirmation' : 'Next: Payment') : 
+                                            (bookingType === 'hospital' ? 'Submit Request' : 'Pay & Confirm')}
                             </span>
                             {currentStep === 4 ? <CheckCircle className="w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
                         </button>

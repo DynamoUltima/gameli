@@ -9,14 +9,38 @@ import { RefreshCw } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserRole } from '@/hooks/useUserRole';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function Index() {
   const [isServicesMenuOpen, setIsServicesMenuOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [activeCampaign, setActiveCampaign] = useState<any>(null);
 
   const { user } = useAuth();
   const { role } = useUserRole(user?.id);
   const navigate = useNavigate();
+
+  // Fetch active campaign
+  useEffect(() => {
+    const fetchCampaign = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('awareness_campaigns')
+          .select('*')
+          .eq('status', 'scheduled')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (data && !error) {
+          setActiveCampaign(data);
+        }
+      } catch (err) {
+        console.error("Error fetching campaign:", err);
+      }
+    };
+    fetchCampaign();
+  }, []);
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -58,6 +82,7 @@ export default function Index() {
         onBookClick={handleBookClick}
         onContactClick={handleContactClick}
         isServicesMenuOpen={isServicesMenuOpen}
+        activeCampaign={activeCampaign}
         toggleServicesMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();

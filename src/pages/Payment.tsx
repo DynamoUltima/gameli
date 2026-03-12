@@ -40,10 +40,10 @@ const Payment = () => {
   };
 
   const appointmentType = searchParams.get("type") || "online";
-  const appointmentLabels: { [key: string]: { name: string; price: string } } = {
-    online: { name: "Online Consultation (45 minutes)", price: "45 GHS" },
-    hospital: { name: "Hospital Visit", price: amount === "144" ? "144 GHS (First Visit)" : "104 GHS (Follow-up)" },
-    home: { name: "Home Visit", price: `${amount} GHS` }
+  const appointmentLabels: { [key: string]: { name: string; price: string; duration?: string } } = {
+    online: { name: "Online Consultation", price: `${amount} GHS`, duration: "45 minutes" },
+    hospital: { name: "Hospital Visit", price: `${amount} GHS`, duration: "N/A" },
+    home: { name: "Home Visit", price: `${amount} GHS`, duration: "N/A" }
   };
 
   return (
@@ -139,7 +139,10 @@ const Payment = () => {
                         id="momo-phone"
                         placeholder="0XX XXX XXXX"
                         value={momoData.phone}
-                        onChange={(e) => setMomoData({ ...momoData, phone: e.target.value })}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '');
+                          setMomoData({ ...momoData, phone: value });
+                        }}
                       />
                       <p className="text-sm text-muted-foreground">
                         You'll receive a prompt on your phone to authorize the payment
@@ -230,11 +233,11 @@ const Payment = () => {
                 <div className="space-y-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Service:</span>
-                    <span className="font-medium">Online Consultation</span>
+                    <span className="font-medium">{appointmentLabels[appointmentType]?.name}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Duration:</span>
-                    <span className="font-medium">45 minutes</span>
+                    <span className="font-medium">{appointmentLabels[appointmentType]?.duration}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Amount:</span>

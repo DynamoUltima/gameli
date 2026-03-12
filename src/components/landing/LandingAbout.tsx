@@ -7,7 +7,7 @@ export function LandingAbout() {
                 {/* Left Side: Large Image & Stats Grid */}
                 <div className="flex flex-col gap-16">
                     <div className="w-full aspect-[4/3] rounded-[2.5rem] overflow-hidden shadow-lg">
-                        <img src="https://images.unsplash.com/photo-1538108149393-fbbd81895907?auto=format&fit=crop&q=80&w=1200" className="w-full h-full object-cover" alt="Medical team" />
+                        <img src="/st-gamaliel-hospital.jpg" className="w-full h-full object-cover" alt="St. Gamaliel's Hospital" />
                     </div>
 
                     <div className="grid grid-cols-3 gap-6 pt-4">
@@ -48,7 +48,7 @@ export function LandingAbout() {
                 <div className="flex flex-col h-full justify-between">
                     <div>
                         <p className="text-base font-medium text-slate-500 mb-4 tracking-tight">
-                            About Gameli /
+                            About St. Gamaliel /
                         </p>
                         <h2 className="text-4xl sm:text-5xl lg:text-5xl font-medium text-slate-900 tracking-tighter uppercase leading-[1.1] mb-8">
                             Excellence In

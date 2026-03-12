@@ -15,7 +15,7 @@ import { ArrowLeft, ArrowRight, Check, Video, Hospital, Home, CreditCard, Smartp
 import { toast } from "sonner";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { supabase } from "@/integrations/supabase/client";
-import { format, addMinutes, isToday } from "date-fns";
+import { format, addMinutes, isToday, startOfDay } from "date-fns";
 
 const BookAppointment = () => {
   const { type } = useParams<{ type: string }>();
@@ -28,6 +28,8 @@ const BookAppointment = () => {
   const [selectedTime, setSelectedTime] = useState<string>(""); // ISO string
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
+  const [generalAvailability, setGeneralAvailability] = useState<any[]>([]);
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
 
   // Use the doctors hook for data
   const { doctors, specialties, loading: doctorsLoading } = useDoctors();
@@ -89,7 +91,7 @@ const BookAppointment = () => {
     return doctors
       .filter(doc => doc.specialties?.some(s => s.id === formData.clinic) && doc.available)
       .map(doc => ({
-        id: doc.id,
+        id: doc.user_id,
         full_name: doc.profiles?.full_name || "Unknown Doctor"
       }));
   }, [formData.clinic, doctors]);
@@ -133,9 +135,30 @@ const BookAppointment = () => {
     };
 
     loadAvailableSlots();
-    // Remove selectedTime from dependencies to avoid infinite loops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, formData.doctor, getAvailableSlots]);
+
+  useEffect(() => {
+    const fetchGeneralAvailability = async () => {
+      if (!formData.doctor) {
+        setGeneralAvailability([]);
+        return;
+      }
+      setIsLoadingCalendar(true);
+      try {
+        const { data, error } = await supabase
+          .from('doctor_availability')
+          .select('date, day_of_week')
+          .eq('doctor_id', formData.doctor);
+        if (error) throw error;
+        setGeneralAvailability(data || []);
+      } catch (error) {
+        console.error('Error fetching general availability:', error);
+      } finally {
+        setIsLoadingCalendar(false);
+      }
+    };
+    fetchGeneralAvailability();
+  }, [formData.doctor]);
 
   const handleDateSelect = async (date: Date | undefined) => {
     if (!date) {
@@ -212,11 +235,11 @@ const BookAppointment = () => {
       toast.error("Please select a clinic and describe your symptoms");
       return;
     }
-    if (step === 2 && type === "online" && !formData.doctor) {
-      toast.error("Please select a doctor for online appointments");
+    if (step === 2 && !formData.doctor) {
+      toast.error("Please select a doctor to see their availability");
       return;
     }
-    if (step === 3 && type === "online" && (!selectedDate || !selectedTime)) {
+    if (step === 3 && (!selectedDate || !selectedTime)) {
       toast.error("Please select an appointment date and time");
       return;
     }
@@ -227,7 +250,7 @@ const BookAppointment = () => {
     try {
       // Combine date and time into ISO timestamp
       let scheduledAt: string | null = null;
-      if (type === "online" && selectedDate && selectedTime) {
+      if (selectedDate && selectedTime) {
         // selectedTime is already an ISO string from getAvailableSlots
         scheduledAt = selectedTime;
       }
@@ -290,7 +313,7 @@ const BookAppointment = () => {
     }
   };
 
-  const steps = type === "online" ? 4 : 3;
+  const steps = 4;
 
   const selectedSpecialtyObj = specialties.find(s => s.id === formData.clinic);
   const displayAmount = selectedSpecialtyObj?.cost || currentType.price;
@@ -334,8 +357,8 @@ const BookAppointment = () => {
                 <span className="text-xs mt-2 text-muted-foreground">
                   {index === 0 && "Personal Info"}
                   {index === 1 && "Medical Details"}
-                  {index === 2 && type === "online" ? "Select Date" : "Confirmation"}
-                  {index === 3 && "Payment"}
+                  {index === 2 && "Select Date"}
+                  {index === 3 && (type === "online" ? "Payment" : "Confirmation")}
                 </span>
               </div>
               {index < steps - 1 && (
@@ -350,14 +373,14 @@ const BookAppointment = () => {
             <CardTitle>
               {step === 1 && "Personal Information"}
               {step === 2 && "Medical Information"}
-              {step === 3 && (type === "online" ? "Select Date & Time" : "Review & Confirm")}
-              {step === 4 && "Payment Method"}
+              {step === 3 && "Select Date & Time"}
+              {step === 4 && (type === "online" ? "Payment Method" : "Review & Confirm")}
             </CardTitle>
             <CardDescription>
               {step === 1 && "Tell us about yourself"}
               {step === 2 && "Help us understand your medical needs"}
-              {step === 3 && (type === "online" ? "Choose your preferred appointment slot" : "Review your booking details")}
-              {step === 4 && "Choose how you'd like to pay"}
+              {step === 3 && "Choose your preferred appointment slot"}
+              {step === 4 && (type === "online" ? "Choose how you'd like to pay" : "Review your booking details")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -477,7 +500,7 @@ const BookAppointment = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="doctor">
-                    Preferred Doctor {type === "online" ? "*" : "(Optional)"}
+                    Preferred Doctor *
                   </Label>
                   <Select
                     value={formData.doctor}
@@ -500,11 +523,9 @@ const BookAppointment = () => {
                   {formData.clinic && doctorsForClinic.length === 0 && (
                     <p className="text-sm text-muted-foreground">No doctors available for this clinic yet.</p>
                   )}
-                  {type === "online" && (
-                    <p className="text-sm text-primary">
-                      Required for online appointments to show available time slots
-                    </p>
-                  )}
+                  <p className="text-sm text-primary">
+                    Required to show available time slots
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -532,16 +553,37 @@ const BookAppointment = () => {
               </div>
             )}
 
-            {/* Step 3: Date Selection (Online) or Confirmation */}
-            {step === 3 && type === "online" && (
+            {/* Step 3: Date Selection */}
+            {step === 3 && (
               <div className="space-y-4">
-                <div className="flex justify-center">
+                <div className="flex justify-center relative min-h-[320px]">
+                  {isLoadingCalendar && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-sm rounded-md border">
+                      <div className="flex flex-col items-center text-muted-foreground">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-2"></div>
+                        <span className="text-sm font-medium">Checking doctor's calendar...</span>
+                      </div>
+                    </div>
+                  )}
                   <Calendar
                     mode="single"
                     selected={selectedDate}
                     onSelect={handleDateSelect}
                     className="rounded-md border"
-                    disabled={(date) => date < new Date()}
+                    disabled={(date) => {
+                      const today = startOfDay(new Date());
+                      if (date < today) return true;
+                      
+                      if (!formData.doctor || generalAvailability.length === 0) return true;
+                      
+                      const dateStr = format(date, 'yyyy-MM-dd');
+                      const dayOfWeek = format(date, 'EEEE').toLowerCase();
+                      
+                      const hasSlot = generalAvailability.some(slot => 
+                        slot.date === dateStr || (!slot.date && slot.day_of_week === dayOfWeek)
+                      );
+                      return !hasSlot;
+                    }}
                   />
                 </div>
                 {selectedDate && (
@@ -593,38 +635,8 @@ const BookAppointment = () => {
               </div>
             )}
 
-            {step === 3 && type !== "online" && (
-              <div className="space-y-4">
-                <div className="p-6 bg-muted rounded-lg space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Name:</span>
-                    <span className="font-medium">{formData.name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Phone:</span>
-                    <span className="font-medium">{formData.phone}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Clinic:</span>
-                    <span className="font-medium capitalize">{specialties.find(s => s.id === formData.clinic)?.name}</span>
-                  </div>
-                  {/* {type === "hospital" && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Price:</span>
-                      <span className="font-medium">{formData.patientType === "new" ? "144" : "104"} GHS</span>
-                    </div>
-                  )} */}
-                </div>
-                <div className="bg-warning/10 border border-warning/20 p-4 rounded-lg">
-                  <p className="text-sm text-foreground">
-                    <strong>Note:</strong> Our admin team will contact you shortly to confirm the appointment date and time.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Step 4: Payment Method (Online only) */}
-            {step === 4 && (
+            {/* Step 4: Payment Method (Online) or Confirmation (Hospital/Home) */}
+            {step === 4 && type === "online" && (
               <div className="space-y-4">
                 <RadioGroup value={formData.paymentMethod} onValueChange={(value) => setFormData({ ...formData, paymentMethod: value })}>
                   <div className="flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer hover:border-primary transition-colors">
@@ -663,6 +675,36 @@ const BookAppointment = () => {
                     <span>Total:</span>
                     <span className="text-primary">{displayAmount} GHS</span>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && type !== "online" && (
+              <div className="space-y-4">
+                <div className="p-6 bg-muted rounded-lg space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Name:</span>
+                    <span className="font-medium">{formData.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="font-medium">{formData.phone}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Clinic:</span>
+                    <span className="font-medium capitalize">{specialties.find(s => s.id === formData.clinic)?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Date & Time:</span>
+                    <span className="font-medium">
+                        {selectedDate ? format(selectedDate, 'MMM do, yyyy') : ''}{selectedTime ? `, ${format(new Date(selectedTime), 'h:mm a')}` : ''}
+                    </span>
+                  </div>
+                </div>
+                <div className="bg-warning/10 border border-warning/20 p-4 rounded-lg">
+                  <p className="text-sm text-foreground">
+                    <strong>Note:</strong> Our admin team will contact you shortly to confirm the appointment. Payment will be completed at the hospital.
+                  </p>
                 </div>
               </div>
             )}

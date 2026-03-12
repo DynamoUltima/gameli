@@ -64,13 +64,22 @@ const AdminDashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [filterDoctor, setFilterDoctor] = useState("all");
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [isEditCampaignModalOpen, setIsEditCampaignModalOpen] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
   const [newCampaign, setNewCampaign] = useState({
     title: "",
     subtitle: "",
     image: null as File | null,
     scheduleDate: "",
-    duration: "",
+    duration: "7",
     durationUnit: "days"
+  });
+  const [editCampaignData, setEditCampaignData] = useState({
+    title: "",
+    subtitle: "",
+    image: null as File | null
   });
   const { toast } = useToast();
   const [filterType, setFilterType] = useState("all");
@@ -78,8 +87,6 @@ const AdminDashboard = () => {
   const [addDoctorOpen, setAddDoctorOpen] = useState(false);
   const [editDoctorOpen, setEditDoctorOpen] = useState(false);
   const [selectedEditDoctor, setSelectedEditDoctor] = useState<any>(null);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<string | null>(null);
   const [newStatus, setNewStatus] = useState<string>('');
@@ -208,7 +215,7 @@ const AdminDashboard = () => {
       subtitle: "",
       image: null,
       scheduleDate: "",
-      duration: "",
+      duration: "7",
       durationUnit: "days"
     });
   };
@@ -426,24 +433,24 @@ const AdminDashboard = () => {
     fetchPatientCount();
   }, []);
 
+  const fetchCampaigns = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('awareness_campaigns')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setCampaigns(data || []);
+    } catch (error) {
+      console.error('Error fetching campaigns:', error);
+    } finally {
+      setLoadingCampaigns(false);
+    }
+  };
+
   // Fetch awareness campaigns from database
   useEffect(() => {
-    const fetchCampaigns = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('awareness_campaigns')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setCampaigns(data || []);
-      } catch (error) {
-        console.error('Error fetching campaigns:', error);
-      } finally {
-        setLoadingCampaigns(false);
-      }
-    };
-
     fetchCampaigns();
   }, []);
 
@@ -1416,6 +1423,92 @@ const AdminDashboard = () => {
         description: error.message || "Failed to delete specialty",
         variant: "destructive"
       });
+    }
+  };
+
+  const handleDeleteCampaign = async (campaignId: string) => {
+    if (!confirm('Are you sure you want to delete this campaign?')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('awareness_campaigns')
+        .delete()
+        .eq('id', campaignId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Campaign deleted successfully"
+      });
+
+      fetchCampaigns();
+    } catch (error: any) {
+      console.error('Error deleting campaign:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete campaign",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleEditCampaignSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCampaign) return;
+
+    setIsUploading(true);
+    try {
+      let imageUrl = selectedCampaign.image_url;
+
+      if (editCampaignData.image) {
+        const fileExt = editCampaignData.image.name.split('.').pop();
+        const fileName = `${uuidv4()}.${fileExt}`;
+        const filePath = `campaigns/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('hms')
+          .upload(filePath, editCampaignData.image);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('hms')
+          .getPublicUrl(filePath);
+
+        imageUrl = publicUrl;
+      }
+
+      const { error } = await supabase
+        .from('awareness_campaigns')
+        .update({
+          title: editCampaignData.title,
+          subtitle: editCampaignData.subtitle,
+          image_url: imageUrl
+        })
+        .eq('id', selectedCampaign.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Campaign updated successfully"
+      });
+
+      setIsEditCampaignModalOpen(false);
+      setSelectedCampaign(null);
+      fetchCampaigns();
+    } catch (error: any) {
+      console.error('Error updating campaign:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update campaign",
+        variant: "destructive"
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -2782,7 +2875,6 @@ const AdminDashboard = () => {
                                 <TableHead>Doctor</TableHead>
                                 <TableHead>Specialty</TableHead>
                                 <TableHead>Contact</TableHead>
-                                <TableHead>Experience</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead>Actions</TableHead>
                               </TableRow>
@@ -2807,9 +2899,6 @@ const AdminDashboard = () => {
                                       <div className="text-foreground">{doctor.profiles?.email}</div>
                                       <div className="text-muted-foreground">{doctor.profiles?.phone}</div>
                                     </div>
-                                  </TableCell>
-                                  <TableCell className="text-foreground">
-                                    {doctor.years_of_experience ? `${doctor.years_of_experience} years` : 'N/A'}
                                   </TableCell>
                                   <TableCell>
                                     <Badge variant={doctor.available ? "default" : "secondary"}>
@@ -3303,6 +3392,22 @@ const AdminDashboard = () => {
                               variant="outline"
                               className="flex-1"
                               onClick={() => {
+                                setSelectedCampaign(campaign);
+                                setEditCampaignData({
+                                  title: campaign.title,
+                                  subtitle: campaign.subtitle || "",
+                                  image: null
+                                });
+                                setIsEditCampaignModalOpen(true);
+                              }}
+                            >
+                              <Edit className="w-4 h-4 mr-2" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="flex-1"
+                              onClick={() => {
                                 if (campaign.image_url) {
                                   window.open(campaign.image_url, '_blank');
                                 }
@@ -3310,6 +3415,14 @@ const AdminDashboard = () => {
                             >
                               <Eye className="w-4 h-4 mr-2" />
                               View
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="flex-1 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => handleDeleteCampaign(campaign.id)}
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
                             </Button>
                           </div>
                         </div>
@@ -3833,6 +3946,84 @@ const AdminDashboard = () => {
               Save Changes
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Campaign Dialog */}
+      <Dialog open={isEditCampaignModalOpen} onOpenChange={setIsEditCampaignModalOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Edit Campaign Details</DialogTitle>
+            <DialogDescription>
+              Update the title and subtitle for this awareness campaign.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditCampaignSubmit}>
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="editCampaignTitle">Title *</Label>
+                <Input
+                  id="editCampaignTitle"
+                  value={editCampaignData.title}
+                  onChange={(e) => setEditCampaignData({ ...editCampaignData, title: e.target.value })}
+                  placeholder="Enter campaign title"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editCampaignSubtitle">Subtitle</Label>
+                <Textarea
+                  id="editCampaignSubtitle"
+                  value={editCampaignData.subtitle}
+                  onChange={(e) => setEditCampaignData({ ...editCampaignData, subtitle: e.target.value })}
+                  placeholder="Enter a brief description"
+                  rows={3}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editCampaignImage">New Image (optional)</Label>
+                <div className="mt-2">
+                  <Input
+                    id="editCampaignImage"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        setEditCampaignData({ ...editCampaignData, image: e.target.files[0] });
+                      }
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Leave empty to keep the current image
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsEditCampaignModalOpen(false);
+                  setSelectedCampaign(null);
+                }}
+                disabled={isUploading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isUploading}>
+                {isUploading ? (
+                  <span className="flex items-center">
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving...
+                  </span>
+                ) : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

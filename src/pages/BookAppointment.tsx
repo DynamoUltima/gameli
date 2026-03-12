@@ -251,8 +251,22 @@ const BookAppointment = () => {
       // Combine date and time into ISO timestamp
       let scheduledAt: string | null = null;
       if (selectedDate && selectedTime) {
-        // selectedTime is already an ISO string from getAvailableSlots
-        scheduledAt = selectedTime;
+        // Parse "09:00 AM" and combine with selectedDate
+        const timeMatch = selectedTime.match(/(\d+):(\d+)\s(.*)/);
+        if (timeMatch) {
+          let [_, hoursStr, minutesStr, modifier] = timeMatch;
+          let hours = parseInt(hoursStr, 10);
+          let minutes = parseInt(minutesStr, 10);
+          if (modifier === 'PM' && hours < 12) hours += 12;
+          if (modifier === 'AM' && hours === 12) hours = 0;
+          
+          const dateObj = new Date(selectedDate);
+          dateObj.setHours(hours, minutes, 0, 0);
+          scheduledAt = dateObj.toISOString();
+        } else {
+           // Fallback if it is already ISO
+           scheduledAt = selectedTime;
+        }
       }
 
       console.log({ '-------type---': type })
@@ -279,6 +293,23 @@ const BookAppointment = () => {
         .maybeSingle();
 
       if (apptErr) throw apptErr;
+      
+      const clinicName = specialties.find(s => s.id === formData.clinic)?.name || '';
+      if (clinicName.toLowerCase().includes('fertility')) {
+        const { error: formErr } = await supabase
+          .from("medical_forms" as any)
+          .insert({
+            appointment_id: (appt as any).id,
+            patient_id: user?.id,
+            form_type: formData.gender?.toLowerCase() === 'female' ? 'female_fertility' : 'male_fertility',
+            status: 'pending'
+          });
+          
+        if (formErr) {
+          console.error("Failed to create medical form req:", formErr);
+        }
+      }
+
       console.log({
         homeVisitDebug: {
           patient_id: user?.id,

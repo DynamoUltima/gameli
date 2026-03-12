@@ -41,7 +41,6 @@ const formSchema = z.object({
   phone: z.string().min(10, { message: 'Phone number must be at least 10 characters' }),
   gender: z.string().optional(),
   specialty_ids: z.array(z.string()).min(1, { message: 'Please select at least one specialty' }),
-  years_of_experience: z.string().min(1, { message: 'Years of experience is required' }),
 });
 
 interface AddDoctorDialogProps {
@@ -80,7 +79,6 @@ export const AddDoctorDialog = ({
       phone: '',
       gender: '',
       specialty_ids: [],
-      years_of_experience: '',
     },
   });
 
@@ -147,7 +145,7 @@ export const AddDoctorDialog = ({
       // Create doctor record
       const { data: doctorData, error: doctorError } = await supabase.from('doctors').insert({
         user_id: authData.user.id,
-        years_of_experience: parseInt(values.years_of_experience),
+        years_of_experience: 0,
         available: true,
       }).select('id').single();
 
@@ -213,7 +211,7 @@ export const AddDoctorDialog = ({
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" autoComplete="off">
             <FormField
               control={form.control}
               name="first_name"
@@ -278,7 +276,7 @@ export const AddDoctorDialog = ({
                 <FormItem>
                   <FormLabel>Password</FormLabel>
                   <FormControl>
-                    <Input type="password" placeholder="••••••••" {...field} />
+                    <Input type="password" placeholder="••••••••" autoComplete="new-password" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -368,19 +366,6 @@ export const AddDoctorDialog = ({
                       />
                     ))}
                   </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="years_of_experience"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Years of Experience</FormLabel>
-                  <FormControl>
-                    <Input type="number" placeholder="5" {...field} />
-                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

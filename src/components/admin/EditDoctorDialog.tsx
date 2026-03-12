@@ -31,7 +31,6 @@ const formSchema = z.object({
     last_name: z.string().min(2, { message: 'Last name must be at least 2 characters' }),
     phone: z.string().min(10, { message: 'Phone number must be at least 10 characters' }),
     specialty_ids: z.array(z.string()).min(1, { message: 'Please select at least one specialty' }),
-    years_of_experience: z.string().min(1, { message: 'Years of experience is required' }),
 });
 
 interface EditDoctorDialogProps {
@@ -59,7 +58,6 @@ export const EditDoctorDialog = ({
             last_name: '',
             phone: '',
             specialty_ids: [],
-            years_of_experience: '',
         },
     });
 
@@ -76,7 +74,6 @@ export const EditDoctorDialog = ({
                 last_name: lastName,
                 phone: doctor.profiles?.phone || '',
                 specialty_ids: specialtyIds,
-                years_of_experience: doctor.years_of_experience?.toString() || '',
             });
         }
     }, [doctor, open, form]);
@@ -100,15 +97,8 @@ export const EditDoctorDialog = ({
 
             if (profileError) throw profileError;
 
-            // 2. Update Doctor details (years_of_experience)
-            const { error: doctorError } = await supabase
-                .from('doctors')
-                .update({
-                    years_of_experience: parseInt(values.years_of_experience) || null,
-                })
-                .eq('id', doctor.id);
-
-            if (doctorError) throw doctorError;
+            // 2. Doctor details like years_of_experience are no longer updated here
+            // Removing the old update block
 
             // 3. Update Specialties
             // First delete existing specialties
@@ -199,20 +189,6 @@ export const EditDoctorDialog = ({
                                     <FormLabel>Phone Number</FormLabel>
                                     <FormControl>
                                         <Input placeholder="+1234567890" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="years_of_experience"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Years of Experience</FormLabel>
-                                    <FormControl>
-                                        <Input type="number" placeholder="5" {...field} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>

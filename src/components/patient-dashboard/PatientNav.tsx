@@ -4,12 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 
-interface Notification {
-    id: string;
-    type: 'confirmed' | 'cancelled' | 'pending' | 'completed';
-    message: string;
-    time: string;
-}
+import { Notification } from "@/pages/PatientDashboard";
 
 interface PatientNavProps {
     fullName: string;
@@ -18,7 +13,8 @@ interface PatientNavProps {
     notifications: Notification[];
     onMarkAllRead: () => void;
     formatRelativeTime: (time: string) => string;
-    getNotificationIcon: (type: string) => React.ReactNode;
+    getNotificationIcon: (notification: Notification) => React.ReactNode;
+    onNotificationClick: (notification: Notification) => void;
 }
 
 export const PatientNav = ({
@@ -28,7 +24,8 @@ export const PatientNav = ({
     notifications,
     onMarkAllRead,
     formatRelativeTime,
-    getNotificationIcon
+    getNotificationIcon,
+    onNotificationClick
 }: PatientNavProps) => {
     return (
         <nav className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30 shadow-sm dark:bg-slate-950 dark:border-slate-800">
@@ -99,12 +96,29 @@ export const PatientNav = ({
                                             <div
                                                 key={notification.id}
                                                 className="p-4 border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer flex gap-3"
+                                                onClick={() => onNotificationClick(notification)}
                                             >
                                                 <div className="mt-0.5 shrink-0">
-                                                    {getNotificationIcon(notification.type)}
+                                                    {getNotificationIcon(notification)}
                                                 </div>
                                                 <div>
-                                                    <p className="text-sm text-slate-900 dark:text-slate-100 font-medium tracking-tight leading-snug">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm text-slate-900 dark:text-slate-100 font-medium tracking-tight">
+                                                            {notification.title || (
+                                                                notification.type === 'confirmed' ? 'Appointment confirmed' :
+                                                                notification.type === 'cancelled' ? 'Appointment cancelled' :
+                                                                notification.type === 'completed' ? 'Appointment completed' :
+                                                                notification.type === 'pending' ? 'Appointment pending' :
+                                                                'Notification'
+                                                            )}
+                                                        </p>
+                                                        {notification.isForm && notification.type === 'form_pending' && (
+                                                            <span className="px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[10px] font-medium tracking-wide">
+                                                                ACTION
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                                                         {notification.message}
                                                     </p>
                                                     <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 font-medium uppercase tracking-wider">

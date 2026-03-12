@@ -8,20 +8,26 @@ import { PatientQuickActions } from "@/components/patient-dashboard/PatientQuick
 import { PatientAppointments } from "@/components/patient-dashboard/PatientAppointments";
 import { PatientProfileCard } from "@/components/patient-dashboard/PatientProfileCard";
 import { PatientBookingModal } from "@/components/patient-dashboard/PatientBookingModal";
+import { FertilityIntakeForm } from "@/components/patient-dashboard/FertilityIntakeForm";
 
-import { CheckCircle, XCircle, AlertCircle, Bell } from "lucide-react";
+import { CheckCircle, XCircle, AlertCircle, Bell, ClipboardList, Calendar } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 
-interface Notification {
+export interface Notification {
   id: string;
-  type: 'confirmed' | 'cancelled' | 'pending' | 'completed';
+  type: string;
+  title?: string;
   message: string;
   time: string;
   appointment?: any;
+  formId?: string;
+  formType?: string;
+  formStatus?: string;
+  isForm?: boolean;
 }
 
 const PatientDashboard = () => {
@@ -52,6 +58,11 @@ const PatientDashboard = () => {
   // Booking Modal State
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [bookingType, setBookingType] = useState<string | null>(null);
+
+  // Form State
+  const [activeView, setActiveView] = useState<'dashboard' | 'form'>('dashboard');
+  const [activeFormDetails, setActiveFormDetails] = useState<{id: string, type: string} | null>(null);
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
 
   const handleOpenBooking = (type: string = 'online') => {
     setBookingType(type);
@@ -169,7 +180,7 @@ const PatientDashboard = () => {
             const time = formatTime(apt.scheduled_at);
 
             let message = '';
-            let type: 'confirmed' | 'cancelled' | 'pending' | 'completed' = apt.status;
+            let type: string = apt.status;
 
             switch (apt.status) {
               case 'confirmed': message = `${doctorName} confirmed your appointment for ${date} at ${time}`; break;
@@ -184,13 +195,54 @@ const PatientDashboard = () => {
               type,
               message,
               time: apt.created_at,
-              appointment: apt
+              appointment: apt,
+              isForm: false
             };
           })
         );
 
-        setNotifications(recentNotifications);
-        const unread = recentNotifications.filter(n => n.type === 'confirmed').length;
+        // Fetch medical_forms separately
+        const { data: formsData, error: formsError } = await supabase
+          .from('medical_forms')
+          .select('*')
+          .eq('patient_id', user.id)
+          .gte('created_at', sevenDaysAgo.toISOString())
+          .order('created_at', { ascending: false });
+          
+        if (formsError) {
+          console.error("Error fetching medical forms", formsError);
+        }
+        
+        const formNotifications = (formsData || []).map((form) => {
+          const type = form.status === 'pending' ? 'form_pending' : 'form_completed';
+          const formName = form.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' : 
+                          form.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' : 
+                          form.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' : 'Questionnaire';
+
+          const title = form.status === 'pending' ? 'Medical form required' : 'Medical form submitted';
+          const message = form.status === 'pending' ? 
+            `Please complete your ${formName} before your next visit.` : 
+            `${formName} submitted. All information provided.`;
+            
+          return {
+            id: `form-${form.id}`,
+            type: type,
+            title: title,
+            message: message,
+            time: form.created_at,
+            formId: form.id,
+            formType: form.form_type,
+            formStatus: form.status,
+            isForm: true
+          };
+        });
+
+        // Merge and sort all notifications
+        const allNotifications = [...recentNotifications, ...formNotifications]
+          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+        setNotifications(allNotifications);
+        const unread = allNotifications.filter(n => n.type === 'confirmed' || (n.isForm && n.type === 'form_pending')).length;
         setUnreadCount(unread);
       } catch (error) {
         console.error('Error fetching notifications:', error);
@@ -270,13 +322,94 @@ const PatientDashboard = () => {
     }
   };
 
-  const getNotificationIcon = (type: string) => {
-    switch (type) {
-      case 'confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
-      case 'cancelled': return <XCircle className="w-5 h-5 text-red-500" />;
-      case 'completed': return <CheckCircle className="w-5 h-5 text-blue-500" />;
-      case 'pending': return <AlertCircle className="w-5 h-5 text-amber-500" />;
-      default: return <Bell className="w-5 h-5 text-slate-400" />;
+  const getNotificationIcon = (notification: Notification) => {
+    if (notification.isForm) {
+      if (notification.type === 'form_pending') {
+         return (
+           <div className="w-8 h-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+             <ClipboardList className="w-4 h-4" strokeWidth={2} />
+           </div>
+         );
+      } else {
+         return (
+           <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+             <CheckCircle className="w-4 h-4" strokeWidth={2} />
+           </div>
+         );
+      }
+    }
+
+    switch (notification.type) {
+      case 'confirmed': 
+        return (
+          <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Calendar className="w-4 h-4" strokeWidth={2} />
+          </div>
+        );
+      case 'cancelled': 
+        return (
+          <div className="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+            <XCircle className="w-4 h-4" strokeWidth={2} />
+          </div>
+        );
+      case 'completed': 
+        return (
+          <div className="w-8 h-8 rounded-full bg-green-50 text-green-600 flex items-center justify-center shrink-0">
+            <CheckCircle className="w-4 h-4" strokeWidth={2} />
+          </div>
+        );
+      case 'pending': 
+        return (
+          <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-4 h-4" strokeWidth={2} />
+          </div>
+        );
+      default: 
+        return (
+          <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">
+             <Bell className="w-4 h-4" strokeWidth={2} />
+          </div>
+        );
+    }
+  };
+
+  const handleNotificationClick = (notification: Notification) => {
+    if (notification.isForm && notification.formStatus === 'pending') {
+      setActiveFormDetails({ id: notification.formId!, type: notification.formType! });
+      setActiveView('form');
+    }
+  };
+
+  const handleFormSubmit = async (formData: any) => {
+    if (!activeFormDetails) return;
+    
+    setIsSubmittingForm(true);
+    try {
+      const { error } = await supabase
+        .from('medical_forms')
+        .update({
+          status: 'submitted',
+          data: formData
+        })
+        .eq('id', activeFormDetails.id);
+        
+      if (error) throw error;
+      
+      toast.success("Questionnaire submitted successfully!");
+      setActiveView('dashboard');
+      
+      // Refresh notifications to update form status
+      setUnreadCount(prev => Math.max(0, prev - 1));
+      setNotifications(prev => prev.map(n => 
+        n.formId === activeFormDetails.id 
+          ? { ...n, type: 'completed', formStatus: 'submitted', message: 'Medical form submitted. All information provided.' } 
+          : n
+      ));
+    } catch (error: any) {
+      console.error('Error submitting form:', error);
+      toast.error(error.message || "Failed to submit form");
+    } finally {
+      setIsSubmittingForm(false);
     }
   };
 
@@ -290,10 +423,21 @@ const PatientDashboard = () => {
         onMarkAllRead={() => setUnreadCount(0)}
         formatRelativeTime={formatRelativeTime}
         getNotificationIcon={getNotificationIcon}
+        onNotificationClick={handleNotificationClick}
       />
 
       <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10 sm:py-12 flex-1 relative z-10">
-        {/* Header */}
+        {activeView === 'form' && activeFormDetails ? (
+           <FertilityIntakeForm 
+             formId={activeFormDetails.id}
+             formType={activeFormDetails.type}
+             onBack={() => setActiveView('dashboard')}
+             onSubmit={handleFormSubmit}
+             isSubmitting={isSubmittingForm}
+           />
+        ) : (
+          <>
+            {/* Header */}
         <div className="mb-10">
           <h1 className="text-3xl sm:text-4xl font-medium tracking-tight text-slate-900 dark:text-white mb-2">
             Welcome back, {fullName ? fullName.split(' ')[0] : 'Patient'}!
@@ -327,6 +471,8 @@ const PatientDashboard = () => {
             />
           </div>
         </div>
+          </>
+        )}
       </main>
 
       <PatientBookingModal

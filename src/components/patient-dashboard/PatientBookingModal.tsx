@@ -18,6 +18,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { supabase } from "@/integrations/supabase/client";
 import { format, parse, addMinutes, isBefore, isSameDay, startOfDay } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 interface PatientBookingModalProps {
     isOpen: boolean;
@@ -49,6 +50,8 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
     const [loadingAvailability, setLoadingAvailability] = useState(false);
     
     const { toast } = useToast();
+    const { user } = useAuth();
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const { doctors, specialties, loading } = useDoctors();
     const { getAvailableSlots } = useDoctorSchedules();
@@ -115,7 +118,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedDate, preferredDoctor, getAvailableSlots]);
 
-    const handleNextClick = () => {
+    const handleNextClick = async () => {
         if (currentStep === 1) {
             const form = document.getElementById('personalForm') as HTMLFormElement;
             if (form && !form.checkValidity()) { form.reportValidity(); return; }
@@ -134,6 +137,71 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
         } else if (currentStep === 4) {
             const form = document.getElementById('paymentForm') as HTMLFormElement;
             if (form && !form.checkValidity()) { form.reportValidity(); return; }
+            
+            if (!isSubmitting) {
+                setIsSubmitting(true);
+                try {
+                    let scheduledAt: string | null = null;
+                    if (selectedDate && selectedTime) {
+                        // Parse "09:00 AM" and combine with selectedDate
+                        const [timeStr, modifier] = selectedTime.split(' ');
+                        let [hours, minutes] = timeStr.split(':').map(Number);
+                        if (modifier === 'PM' && hours < 12) hours += 12;
+                        if (modifier === 'AM' && hours === 12) hours = 0;
+                        
+                        const dateObj = new Date(selectedDate);
+                        dateObj.setHours(hours, minutes, 0, 0);
+                        scheduledAt = dateObj.toISOString();
+                    }
+                    
+                    const { data: appt, error: apptErr } = await supabase
+                        .from('appointments' as any)
+                        .insert({
+                            patient_id: user?.id,
+                            doctor_id: preferredDoctor,
+                            clinic: (specialties.find(s => s.id === clinic)?.name) || null,
+                            specialty_id: clinic || null,
+                            type: bookingType,
+                            scheduled_at: scheduledAt ?? new Date().toISOString(),
+                            symptoms: "Online consultation booking", // Default symptom or text from form if available
+                            status: "confirmed",
+                            payment_status: "paid" // Assuming successfully paid in mockup
+                        })
+                        .select('id, doctor_id, scheduled_at')
+                        .maybeSingle();
+                        
+                    if (apptErr) throw apptErr;
+                    
+                    if (isFertility && appt) {
+                        const formType = consultationFor === 'couple' ? 'couple_fertility' : 
+                                       (patientGender === 'female' ? 'female_fertility' : 'male_fertility');
+                        
+                        const { error: formErr } = await supabase
+                            .from('medical_forms' as any)
+                            .insert({
+                                appointment_id: (appt as any).id,
+                                patient_id: user?.id,
+                                form_type: formType,
+                                status: 'pending'
+                            });
+                            
+                        if (formErr) {
+                            console.error("Failed to create medical form:", formErr);
+                        }
+                    }
+                    
+                    if (currentStep < totalSteps) setCurrentStep(curr => curr + 1);
+                } catch (error: any) {
+                    toast({
+                        title: "Booking Failed",
+                        description: error.message || "An error occurred while booking.",
+                        variant: "destructive",
+                    });
+                } finally {
+                    setIsSubmitting(false);
+                }
+            }
+            return;
         } else if (currentStep === 5) {
             handleClose();
             return;
@@ -687,10 +755,12 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                         <button
                             type="button"
                             onClick={handleNextClick}
-                            className="px-8 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl font-medium text-sm hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-2 active:scale-95"
+                            disabled={isSubmitting}
+                            className={`px-8 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl font-medium text-sm hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors shadow-sm flex items-center gap-2 active:scale-95 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                         >
                             <span>
-                                {currentStep === 1 ? 'Next: Medical Details' :
+                                {isSubmitting ? 'Processing...' :
+                                 currentStep === 1 ? 'Next: Medical Details' :
                                     currentStep === 2 ? 'Next: Select Date' :
                                         currentStep === 3 ? (bookingType === 'hospital' ? 'Next: Confirmation' : 'Next: Payment') : 
                                             (bookingType === 'hospital' ? 'Submit Request' : 'Pay & Confirm')}

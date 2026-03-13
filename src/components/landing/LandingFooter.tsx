@@ -1,4 +1,4 @@
-import { Sparkles, Instagram, Twitter, Facebook } from 'lucide-react';
+import { Instagram, Twitter, Facebook } from 'lucide-react';
 
 export function LandingFooter() {
     return (
@@ -6,8 +6,8 @@ export function LandingFooter() {
             <footer className="bg-slate-900 rounded-[2.5rem] px-8 py-16 sm:px-16 sm:py-20 flex flex-col gap-12 shadow-xl">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-12 lg:gap-8">
                     <div className="lg:col-span-4 flex flex-col gap-6">
-                        <a href="#" className="flex items-center gap-2 text-white group w-fit">
-                            <Sparkles className="w-6 h-6 group-hover:rotate-45 transition-transform duration-500 stroke-[1.5px]" />
+                        <a href="#" className="flex items-center gap-3 text-white group w-fit">
+                            <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-full shadow-md group-hover:scale-110 transition-transform duration-500" />
                             <span className="text-xl font-medium tracking-tight">St. Gamaliel</span>
                         </a>
                         <p className="text-white/70 text-base font-normal leading-relaxed max-w-sm">

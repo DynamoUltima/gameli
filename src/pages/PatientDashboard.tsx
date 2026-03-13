@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { ThemeProvider } from "next-themes";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -108,149 +108,164 @@ const PatientDashboard = () => {
     loadProfile();
   }, [user?.id]);
 
-  useEffect(() => {
-    const fetchAppointments = async () => {
-      if (!user?.id) return;
-      try {
-        const { data: appointmentsData, error: appointmentsError } = await supabase
-          .from('appointments')
-          .select('*')
-          .eq('patient_id', user.id)
-          .gte('scheduled_at', new Date().toISOString())
-          .order('scheduled_at', { ascending: true });
+  const fetchAppointments = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      // Use start of today so appointments booked for today are always included.
+      // Also include pending/confirmed (pending/confirmed) appointments regardless of
+      // exact time, in case the stored timestamp is slightly behind the current moment.
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
 
-        if (appointmentsError) throw appointmentsError;
+      const { data: appointmentsData, error: appointmentsError } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('patient_id', user.id)
+        .not('status', 'in', '(cancelled,completed)')
+        .order('scheduled_at', { ascending: true });
 
-        const enrichedAppointments = await Promise.all(
-          (appointmentsData || []).map(async (apt) => {
-            const { data: doctorProfile } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', apt.doctor_id)
-              .single();
+      if (appointmentsError) throw appointmentsError;
 
-            const { data: specialty } = await supabase
-              .from('specialties')
-              .select('name')
-              .eq('id', apt.specialty_id)
-              .single();
+      // Show appointments from start of today, OR any pending/confirmed appointment.
+      const filtered = (appointmentsData || []).filter(apt => {
+        const isPendingOrConfirmed = apt.status === 'pending' || apt.status === 'confirmed';
+        const isFromToday = new Date(apt.scheduled_at) >= startOfToday;
+        return isPendingOrConfirmed || isFromToday;
+      });
 
-            return {
-              ...apt,
-              doctor_profile: doctorProfile,
-              specialty: specialty
-            };
-          })
-        );
-        setAppointments(enrichedAppointments || []);
-      } catch (error) {
-        console.error('Error fetching appointments:', error);
-      } finally {
-        setLoadingAppointments(false);
-      }
-    };
-    fetchAppointments();
-  }, [user?.id]);
+      const enrichedAppointments = await Promise.all(
+        filtered.map(async (apt) => {
+          const { data: doctorProfile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', apt.doctor_id)
+            .single();
 
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      if (!user?.id) return;
-      try {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          const { data: specialty } = await supabase
+            .from('specialties')
+            .select('name')
+            .eq('id', apt.specialty_id)
+            .single();
 
-        const { data: recentAppointments, error } = await supabase
-          .from('appointments')
-          .select('*')
-          .eq('patient_id', user.id)
-          .gte('created_at', sevenDaysAgo.toISOString())
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        const recentNotifications = await Promise.all(
-          (recentAppointments || []).map(async (apt) => {
-            const { data: doctorProfile } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', apt.doctor_id)
-              .single();
-
-            const doctorName = doctorProfile?.full_name || 'Doctor';
-            const date = formatDate(apt.scheduled_at);
-            const time = formatTime(apt.scheduled_at);
-
-            let message = '';
-            let type: string = apt.status;
-
-            switch (apt.status) {
-              case 'confirmed': message = `${doctorName} confirmed your appointment for ${date} at ${time}`; break;
-              case 'cancelled': message = `Your appointment with ${doctorName} on ${date} was cancelled`; break;
-              case 'completed': message = `Your appointment with ${doctorName} on ${date} has been completed`; break;
-              case 'pending': message = `New appointment with ${doctorName} scheduled for ${date} at ${time}`; break;
-              default: message = `Appointment update with ${doctorName}`;
-            }
-
-            return {
-              id: apt.id,
-              type,
-              message,
-              time: apt.created_at,
-              appointment: apt,
-              isForm: false
-            };
-          })
-        );
-
-        // Fetch medical_forms separately
-        const { data: formsData, error: formsError } = await supabase
-          .from('medical_forms')
-          .select('*')
-          .eq('patient_id', user.id)
-          .gte('created_at', sevenDaysAgo.toISOString())
-          .order('created_at', { ascending: false });
-          
-        if (formsError) {
-          console.error("Error fetching medical forms", formsError);
-        }
-        
-        const formNotifications = (formsData || []).map((form) => {
-          const type = form.status === 'pending' ? 'form_pending' : 'form_completed';
-          const formName = form.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' : 
-                          form.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' : 
-                          form.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' : 'Questionnaire';
-
-          const title = form.status === 'pending' ? 'Medical form required' : 'Medical form submitted';
-          const message = form.status === 'pending' ? 
-            `Please complete your ${formName} before your next visit.` : 
-            `${formName} submitted. All information provided.`;
-            
           return {
-            id: `form-${form.id}`,
-            type: type,
-            title: title,
-            message: message,
-            time: form.created_at,
-            formId: form.id,
-            formType: form.form_type,
-            formStatus: form.status,
-            isForm: true
+            ...apt,
+            doctor_profile: doctorProfile,
+            specialty: specialty
           };
-        });
-
-        // Merge and sort all notifications
-        const allNotifications = [...recentNotifications, ...formNotifications]
-          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-
-        setNotifications(allNotifications);
-        const unread = allNotifications.filter(n => n.type === 'confirmed' || (n.isForm && n.type === 'form_pending')).length;
-        setUnreadCount(unread);
-      } catch (error) {
-        console.error('Error fetching notifications:', error);
-      }
-    };
-    fetchNotifications();
+        })
+      );
+      setAppointments(enrichedAppointments || []);
+    } catch (error) {
+      console.error('Error fetching appointments:', error);
+    } finally {
+      setLoadingAppointments(false);
+    }
   }, [user?.id]);
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const { data: recentAppointments, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('patient_id', user.id)
+        .gte('created_at', sevenDaysAgo.toISOString())
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const recentNotifications = await Promise.all(
+        (recentAppointments || []).map(async (apt) => {
+          const { data: doctorProfile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', apt.doctor_id)
+            .single();
+
+          const doctorName = doctorProfile?.full_name || 'Doctor';
+          const date = formatDate(apt.scheduled_at);
+          const time = formatTime(apt.scheduled_at);
+
+          let message = '';
+          let type: string = apt.status;
+
+          switch (apt.status) {
+            case 'confirmed': message = `${doctorName} confirmed your appointment for ${date} at ${time}`; break;
+            case 'cancelled': message = `Your appointment with ${doctorName} on ${date} was cancelled`; break;
+            case 'completed': message = `Your appointment with ${doctorName} on ${date} has been completed`; break;
+            case 'pending': message = `New appointment with ${doctorName} scheduled for ${date} at ${time}`; break;
+            default: message = `Appointment update with ${doctorName}`;
+          }
+
+          return {
+            id: apt.id,
+            type,
+            message,
+            time: apt.created_at,
+            appointment: apt,
+            isForm: false
+          };
+        })
+      );
+
+      // Fetch medical_forms separately
+      const { data: formsData, error: formsError } = await supabase
+        .from('medical_forms')
+        .select('*')
+        .eq('patient_id', user.id)
+        .gte('created_at', sevenDaysAgo.toISOString())
+        .order('created_at', { ascending: false });
+
+      if (formsError) {
+        console.error("Error fetching medical forms", formsError);
+      }
+
+      const formNotifications = (formsData || []).map((form) => {
+        const type = form.status === 'pending' ? 'form_pending' : 'form_completed';
+        const formName = form.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' :
+          form.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' :
+          form.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' : 'Questionnaire';
+
+        const title = form.status === 'pending' ? 'Medical form required' : 'Medical form submitted';
+        const message = form.status === 'pending' ?
+          `Please complete your ${formName} before your next visit.` :
+          `${formName} submitted. All information provided.`;
+
+        return {
+          id: `form-${form.id}`,
+          type: type,
+          title: title,
+          message: message,
+          time: form.created_at,
+          formId: form.id,
+          formType: form.form_type,
+          formStatus: form.status,
+          isForm: true
+        };
+      });
+
+      // Merge and sort all notifications
+      const allNotifications = [...recentNotifications, ...formNotifications]
+        .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+      setNotifications(allNotifications);
+      const unread = allNotifications.filter(n => n.type === 'confirmed' || (n.isForm && n.type === 'form_pending')).length;
+      setUnreadCount(unread);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
 
   const initials = useMemo(() => {
     if (!fullName) return "";
@@ -479,6 +494,7 @@ const PatientDashboard = () => {
       <PatientBookingModal
         isOpen={isBookingModalOpen}
         onClose={() => setIsBookingModalOpen(false)}
+        onBookingSuccess={() => { fetchAppointments(); fetchNotifications(); }}
         bookingType={bookingType}
         patientName={fullName}
         patientPhone={profileData.phone}

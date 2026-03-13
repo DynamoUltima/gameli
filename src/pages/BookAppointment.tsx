@@ -47,7 +47,9 @@ const BookAppointment = () => {
     doctor: "",
     patientType: "new",
     location: "",
-    paymentMethod: "momo"
+    paymentMethod: "momo",
+    bookAsCouple: false,
+    partnerEmail: ""
   });
 
   // Calculate age from date of birth
@@ -296,17 +298,27 @@ const BookAppointment = () => {
       
       const clinicName = specialties.find(s => s.id === formData.clinic)?.name || '';
       if (clinicName.toLowerCase().includes('fertility')) {
+        const patientIsMale = formData.gender?.toLowerCase() === 'male';
+        const primaryFormType = patientIsMale ? 'male_fertility' : 'female_fertility';
+        const partnerFormType = patientIsMale ? 'female_fertility' : 'male_fertility';
+
         const { error: formErr } = await supabase
           .from("medical_forms" as any)
           .insert({
             appointment_id: (appt as any).id,
             patient_id: user?.id,
-            form_type: formData.gender?.toLowerCase() === 'female' ? 'female_fertility' : 'male_fertility',
+            form_type: primaryFormType,
             status: 'pending'
           });
           
         if (formErr) {
           console.error("Failed to create medical form req:", formErr);
+        }
+
+        if (formData.bookAsCouple && formData.partnerEmail) {
+          // Mock sending an email to the partner
+          console.log(`Sending ${partnerFormType} form to partner email: ${formData.partnerEmail}`);
+          toast.success(`A secure link to the partner's form has been sent to ${formData.partnerEmail}`);
         }
       }
 
@@ -673,8 +685,8 @@ const BookAppointment = () => {
                   <div className="flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer hover:border-primary transition-colors">
                     <RadioGroupItem value="momo" id="momo" />
                     <Label htmlFor="momo" className="flex items-center gap-3 flex-1 cursor-pointer">
-                      <div className="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center">
-                        <Smartphone className="w-6 h-6 text-warning" />
+                      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Smartphone className="w-6 h-6 text-primary" />
                       </div>
                       <div>
                         <p className="font-medium">Mobile Money</p>

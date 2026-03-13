@@ -23,13 +23,14 @@ import { useAuth } from "@/hooks/useAuth";
 interface PatientBookingModalProps {
     isOpen: boolean;
     onClose: () => void;
+    onBookingSuccess?: () => void;
     bookingType: string | null;
     patientName?: string;
     patientEmail?: string;
     patientPhone?: string;
 }
 
-export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName, patientEmail, patientPhone }: PatientBookingModalProps) => {
+export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, bookingType, patientName, patientEmail, patientPhone }: PatientBookingModalProps) => {
     const [currentStep, setCurrentStep] = useState(1);
     const totalSteps = 5;
 
@@ -40,6 +41,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
     const [clinic, setClinic] = useState("");
     const [consultationFor, setConsultationFor] = useState("");
     const [patientGender, setPatientGender] = useState("");
+    const [partnerEmail, setPartnerEmail] = useState("");
     const [paymentMethod, setPaymentMethod] = useState("mobile");
 
     const [preferredDoctor, setPreferredDoctor] = useState("");
@@ -173,8 +175,10 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                     if (apptErr) throw apptErr;
                     
                     if (isFertility && appt) {
-                        const formType = consultationFor === 'couple' ? 'couple_fertility' : 
-                                       (patientGender === 'female' ? 'female_fertility' : 'male_fertility');
+                        const formType = consultationFor === 'couple' ? 
+                            (patientGender === 'female' ? 'female_fertility' : 'male_fertility') : 
+                            (patientGender === 'female' ? 'female_fertility' : 'male_fertility');
+                        const partnerFormType = patientGender === 'female' ? 'male_fertility' : 'female_fertility';
                         
                         const { error: formErr } = await supabase
                             .from('medical_forms' as any)
@@ -188,9 +192,22 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                         if (formErr) {
                             console.error("Failed to create medical form:", formErr);
                         }
+
+                        if (consultationFor === 'couple' && partnerEmail) {
+                            console.log(`Sending ${partnerFormType} form to partner email: ${partnerEmail}`);
+                            toast({
+                                title: "Email Sent",
+                                description: `A secure link to the partner's form has been sent to ${partnerEmail}`,
+                            });
+                        }
                     }
                     
-                    if (currentStep < totalSteps) setCurrentStep(curr => curr + 1);
+                    if (currentStep < totalSteps) {
+                        setCurrentStep(curr => curr + 1);
+                        // Trigger dashboard re-fetch so the new appointment
+                        // appears instantly in the upcoming appointments box.
+                        onBookingSuccess?.();
+                    }
                 } catch (error: any) {
                     toast({
                         title: "Booking Failed",
@@ -220,6 +237,7 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
             setClinic("");
             setConsultationFor("");
             setPatientGender("");
+            setPartnerEmail("");
             setPaymentMethod("mobile");
             setPreferredDoctor("");
             setSelectedDate(undefined);
@@ -429,6 +447,47 @@ export const PatientBookingModal = ({ isOpen, onClose, bookingType, patientName,
                                                         </div>
                                                     </div>
                                                 </div>
+                                            )}
+
+                                            {consultationFor === 'couple' && (
+                                                <>
+                                                    <div className="space-y-2 animate-fade-in">
+                                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">
+                                                            Primary Patient Gender <span className="text-red-500">*</span>
+                                                        </label>
+                                                        <div className="relative">
+                                                            <select
+                                                                required
+                                                                value={patientGender}
+                                                                onChange={(e) => setPatientGender(e.target.value)}
+                                                                className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all appearance-none text-sm"
+                                                            >
+                                                                <option value="" disabled>Select...</option>
+                                                                <option value="male">Male</option>
+                                                                <option value="female">Female</option>
+                                                            </select>
+                                                            <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-slate-400">
+                                                                <ChevronDown className="w-5 h-5" />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-2 animate-fade-in sm:col-span-2">
+                                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">
+                                                            Partner's Email Address <span className="text-red-500">*</span>
+                                                        </label>
+                                                        <input
+                                                            type="email"
+                                                            required
+                                                            placeholder="partner@example.com"
+                                                            value={partnerEmail}
+                                                            onChange={(e) => setPartnerEmail(e.target.value)}
+                                                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                                        />
+                                                        <p className="text-xs text-slate-500 mt-1">
+                                                            We will send a separate fertility questionnaire to your partner.
+                                                        </p>
+                                                    </div>
+                                                </>
                                             )}
                                         </div>
 

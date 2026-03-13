@@ -1,15 +1,27 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, Lock, Phone, User, Mail, CreditCard } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Lock,
+  Phone,
+  User,
+  Mail,
+  CreditCard,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Heart,
+  UserRoundCheck,
+  LogIn,
+  ChevronDown,
+} from "lucide-react";
 import { toast } from "sonner";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useUserRole } from "@/hooks/useUserRole";
 
 const Auth = () => {
@@ -20,6 +32,15 @@ const Auth = () => {
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
   const { role, loading: roleLoading } = useUserRole(currentUserId);
 
+  // Flow state: 'register' or 'login'
+  const [flow, setFlow] = useState<'register' | 'login'>('register');
+  // Registration step
+  const [regStep, setRegStep] = useState(1);
+
+  // Password visibility
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   useEffect(() => {
     const testConnection = async () => {
@@ -35,8 +56,6 @@ const Auth = () => {
     const checkPasswordReset = async () => {
       const resetParam = searchParams.get('reset');
       const { data: { session } } = await supabase.auth.getSession();
-      
-      // If there's a session and reset param, user clicked the reset link
       if (session && resetParam === 'true') {
         setIsResettingPassword(true);
       }
@@ -87,7 +106,7 @@ const Auth = () => {
     password: "",
     confirmPassword: "",
     gender: "",
-    role: 'patient' as 'patient' | 'doctor' | 'admin', // default role with proper typing
+    role: 'patient' as 'patient' | 'doctor' | 'admin',
   });
 
   // Login form
@@ -104,9 +123,34 @@ const Auth = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
+  // Password strength
+  const passwordStrength = useMemo(() => {
+    const val = registerData.password;
+    if (val.length === 0) return { level: 0, label: "Must be at least 6 characters", color: "slate" };
+    if (val.length < 6) return { level: 1, label: "Weak", color: "red" };
+    if (val.length < 9) return { level: 2, label: "Fair", color: "amber" };
+    if (val.length < 12) return { level: 3, label: "Good", color: "blue" };
+    return { level: 4, label: "Strong", color: "emerald" };
+  }, [registerData.password]);
+
+  const strengthBarColors: Record<string, string> = {
+    red: "bg-red-400",
+    amber: "bg-amber-400",
+    blue: "bg-blue-400",
+    emerald: "bg-emerald-400",
+  };
+
+  const strengthTextColors: Record<string, string> = {
+    slate: "text-slate-400",
+    red: "text-red-500",
+    amber: "text-amber-500",
+    blue: "text-blue-500",
+    emerald: "text-emerald-500",
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!registerData.firstName.trim() || !registerData.lastName.trim()) {
       toast.error("First name and last name are required");
       return;
@@ -127,7 +171,6 @@ const Auth = () => {
       return;
     }
 
-    // Check if hospital card ID already exists (if provided)
     if (registerData.hospitalCardId.trim()) {
       const { data: existingCard, error: cardError } = await supabase
         .from('profiles')
@@ -145,10 +188,6 @@ const Auth = () => {
 
     setIsLoading(true);
 
-    console.log({'email':registerData.email})
-    console.log({'password':registerData.password})
-    console.log({'role':registerData.role})
-    
     try {
       const { data, error } = await supabase.auth.signUp({
         email: registerData.email,
@@ -168,19 +207,14 @@ const Auth = () => {
         }
       });
 
-      console.log(error)
-      console.log({'data':data})
-
       if (error) throw error;
 
       if (!data.user?.id) {
         throw new Error("User creation failed");
       }
 
-      // Wait a moment for the user to be fully created in the system
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Insert user role with service role client if available, otherwise use regular client
       const { error: roleError } = await supabase
         .from('user_roles')
         .insert({
@@ -205,7 +239,7 @@ const Auth = () => {
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!resetEmail.trim()) {
       toast.error("Please enter your email address");
       return;
@@ -257,8 +291,7 @@ const Auth = () => {
       if (error) throw error;
 
       toast.success("Password updated successfully! You can now login with your new password.");
-      
-      // Sign out and redirect to login
+
       await supabase.auth.signOut();
       setIsResettingPassword(false);
       setNewPassword("");
@@ -274,26 +307,22 @@ const Auth = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // For login, we need email, so we'll use phone as identifier but require email format
+
     if (!loginData.phone || !loginData.password) {
       toast.error("Please enter your email and password");
       return;
     }
 
     setIsLoading(true);
-    
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginData.phone, // Using phone field for email
+        email: loginData.phone,
         password: loginData.password,
       });
 
-      console.log({'login data':data})
-
       if (error) throw error;
 
-      // Fetch user role to determine redirect
       const { data: roleData } = await supabase
         .from('user_roles')
         .select('role')
@@ -301,7 +330,7 @@ const Auth = () => {
         .maybeSingle();
 
       toast.success("Login successful! Redirecting...");
-      
+
       setTimeout(() => {
         if (redirectTo && redirectTo !== "/" && redirectTo.includes("/book/")) {
           navigate(redirectTo);
@@ -327,208 +356,197 @@ const Auth = () => {
     }
   };
 
-  // Show password update form if user clicked reset link
+  const goToStep = (step: number) => {
+    if (step === 2) {
+      if (!registerData.firstName.trim() || !registerData.lastName.trim()) {
+        toast.error("Please fill out First Name and Last Name before continuing.");
+        return;
+      }
+    }
+    setRegStep(step);
+  };
+
+  // --- INPUT CLASSES ---
+  const inputBase =
+    "w-full px-4 py-3 bg-slate-50 border border-slate-200/60 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none";
+  const inputWithIconLeft = `${inputBase} pl-11`;
+
+  // --- RENDER: Password Reset ---
   if (isResettingPassword) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10 py-8">
-        <div className="container max-w-md mx-auto px-4">
-          <div className="flex items-center justify-between mb-6">
-            <Button variant="ghost" asChild>
-              <Link to="/"><ArrowLeft className="w-4 h-4 mr-2" />Back to Home</Link>
-            </Button>
-            <ThemeSwitcher />
-          </div>
+      <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8 text-center animate-fade-in">
+          <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
+          <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-slate-900 mb-2">
+            Set New Password
+          </h1>
+          <p className="text-sm text-slate-500 max-w-sm mx-auto">
+            Enter your new password below to regain access to your account.
+          </p>
+        </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Set New Password</CardTitle>
-              <CardDescription>
-                Enter your new password below
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleUpdatePassword} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="new-password">New Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="new-password"
-                      type="password"
-                      placeholder="Minimum 6 characters"
-                      className="pl-10"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="confirm-new-password">Confirm New Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="confirm-new-password"
-                      type="password"
-                      placeholder="Re-enter your password"
-                      className="pl-10"
-                      value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Updating..." : "Update Password"}
-                </Button>
-
-                <div className="text-center">
+        {/* Card */}
+        <div className="w-full max-w-[520px] bg-white rounded-[1.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden animate-fade-in-up">
+          <form onSubmit={handleUpdatePassword} className="p-6 sm:p-8 space-y-6">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                  New Password <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    className={inputWithIconLeft + " pr-12"}
+                    placeholder="Minimum 6 characters"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsResettingPassword(false);
-                      navigate('/auth');
-                    }}
-                    className="text-sm text-muted-foreground hover:text-primary"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
                   >
-                    Back to login
+                    {showPassword ? <EyeOff className="w-[18px] h-[18px] stroke-[1.5]" /> : <Eye className="w-[18px] h-[18px] stroke-[1.5]" />}
                   </button>
                 </div>
-              </form>
-            </CardContent>
-          </Card>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                  Confirm New Password <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    className={inputWithIconLeft + " pr-12"}
+                    placeholder="Re-enter your password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    required
+                  />
+                  <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-[18px] h-[18px] stroke-[1.5]" /> : <Eye className="w-[18px] h-[18px] stroke-[1.5]" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-6 mt-2 border-t border-slate-50">
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-md shadow-blue-600/20 focus:ring-4 focus:ring-blue-600/20 outline-none flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {isLoading ? "Updating..." : "Update Password"}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="mt-8 text-center">
+          <p className="text-sm text-slate-500 font-medium">
+            <button
+              type="button"
+              onClick={() => {
+                setIsResettingPassword(false);
+                navigate('/auth');
+              }}
+              className="text-slate-900 hover:text-blue-600 transition-colors ml-1 hover:underline underline-offset-4 decoration-2 decoration-blue-200 hover:decoration-blue-600"
+            >
+              Back to login
+            </button>
+          </p>
         </div>
       </div>
     );
   }
 
+  // --- MAIN AUTH PAGE ---
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10 py-8">
-      <div className="container max-w-md mx-auto px-4">
-        <div className="flex items-center justify-between mb-6">
-          <Button variant="ghost" asChild>
-            <Link to="/"><ArrowLeft className="w-4 h-4 mr-2" />Back to Home</Link>
-          </Button>
-          <ThemeSwitcher />
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8">
+
+      {/* Register Header */}
+      {flow === 'register' && (
+        <div className="mb-8 text-center animate-fade-in">
+          <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
+          <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-slate-900 mb-2">
+            Create your account
+          </h1>
+          <p className="text-sm text-slate-500 max-w-sm mx-auto">
+            Register as a new patient to access records and book appointments effortlessly.
+          </p>
         </div>
+      )}
 
-        <Tabs defaultValue="login" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="login">Login</TabsTrigger>
-            <TabsTrigger value="register">Register</TabsTrigger>
-          </TabsList>
+      {/* Login Header */}
+      {flow === 'login' && (
+        <div className="mb-8 text-center animate-fade-in">
+          <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
+          <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-slate-900 mb-2">
+            Welcome back
+          </h1>
+          <p className="text-sm text-slate-500 max-w-sm mx-auto">
+            Sign in to your patient portal to manage appointments and access your records.
+          </p>
+        </div>
+      )}
 
-          {/* Login Tab */}
-          <TabsContent value="login">
-            <Card>
-              <CardHeader>
-                <CardTitle>Welcome Back</CardTitle>
-                <CardDescription>
-                  Login to access your patient dashboard
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-phone">Email Address</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="login-phone"
-                        type="email"
-                        placeholder="your.email@example.com"
-                        className="pl-10"
-                        value={loginData.phone}
-                        onChange={(e) => setLoginData({ ...loginData, phone: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
+      {/* Main Form Card */}
+      <div className="w-full max-w-[520px] bg-white rounded-[1.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden relative animate-fade-in-up">
 
-                  <div className="space-y-2">
-                    <Label htmlFor="login-password">Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="login-password"
-                        type="password"
-                        placeholder="Enter your password"
-                        className="pl-10"
-                        value={loginData.password}
-                        onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                        required
-                      />
-                    </div>
-                  </div>
+        {/* Progress Bar (Register only) */}
+        {flow === 'register' && (
+          <div className="absolute top-0 left-0 w-full h-1 bg-slate-50">
+            <div
+              className="h-full bg-blue-600 transition-all duration-500 ease-out"
+              style={{ width: regStep === 1 ? '50%' : '100%' }}
+            />
+          </div>
+        )}
 
-                  <div className="flex items-center justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setShowResetPassword(true)}
-                      className="text-sm text-primary hover:underline"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
+        {/* ========== REGISTRATION FORM ========== */}
+        {flow === 'register' && (
+          <form onSubmit={handleRegister} className="p-6 sm:p-8">
 
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? "Logging in..." : "Login"}
-                  </Button>
+            {/* STEP 1: Personal Information */}
+            {regStep === 1 && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-50">
+                  <h2 className="text-sm font-semibold text-slate-900">Personal Information</h2>
+                  <span className="text-xs font-medium text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">Step 1 of 2</span>
+                </div>
 
-                  {/* <div className="text-center text-sm text-muted-foreground">
-                    Don't have an account?{" "}
-                    <span className="text-primary cursor-pointer hover:underline">
-                      Register here
-                    </span>
-                  </div> */}
-                </form>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Register Tab */}
-          <TabsContent value="register">
-            <Card>
-              <CardHeader>
-                <CardTitle>Create Account</CardTitle>
-                <CardDescription>
-                  Register as a new patient to book appointments
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleRegister} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="register-first-name">First Name *</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="register-first-name"
-                        placeholder="John"
-                        className="pl-10"
+                <div className="space-y-4">
+                  {/* Name Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                        First Name <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className={inputBase}
+                        placeholder="Jane"
                         value={registerData.firstName}
                         onChange={(e) => setRegisterData({ ...registerData, firstName: e.target.value })}
                         required
                       />
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="register-other-name">Other Name</Label>
-                      <Input
-                        id="register-other-name"
-                        placeholder="Michael"
-                        value={registerData.otherName}
-                        onChange={(e) => setRegisterData({ ...registerData, otherName: e.target.value })}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="register-last-name">Last Name *</Label>
-                      <Input
-                        id="register-last-name"
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                        Last Name <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className={inputBase}
                         placeholder="Doe"
                         value={registerData.lastName}
                         onChange={(e) => setRegisterData({ ...registerData, lastName: e.target.value })}
@@ -537,177 +555,384 @@ const Auth = () => {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="register-phone">Phone Number</Label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="register-phone"
-                        placeholder="+233 XX XXX XXXX"
-                        className="pl-10"
-                        value={registerData.phone}
-                        onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
+                  {/* Middle Name */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                      Middle / Other Name <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      className={inputBase}
+                      placeholder="Middle name"
+                      value={registerData.otherName}
+                      onChange={(e) => setRegisterData({ ...registerData, otherName: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Gender & DOB */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">Gender</label>
+                      <div className="relative">
+                        <select
+                          className={`${inputBase} appearance-none cursor-pointer pr-10`}
+                          value={registerData.gender}
+                          onChange={(e) => setRegisterData({ ...registerData, gender: e.target.value })}
+                        >
+                          <option value="" disabled>Select...</option>
+                          <option value="female">Female</option>
+                          <option value="male">Male</option>
+                        </select>
+                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                        Date of Birth <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className={inputBase}
+                        value={registerData.dateOfBirth}
+                        onChange={(e) => setRegisterData({ ...registerData, dateOfBirth: e.target.value })}
+                        max={new Date().toISOString().split('T')[0]}
                         required
                       />
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="register-dob">Date of Birth *</Label>
-                    <Input
-                      id="register-dob"
-                      type="date"
-                      value={registerData.dateOfBirth}
-                      onChange={(e) => setRegisterData({ ...registerData, dateOfBirth: e.target.value })}
-                      max={new Date().toISOString().split('T')[0]}
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="register-hospital-card">Hospital Card ID (Optional)</Label>
+                  {/* Hospital Card ID */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                      Hospital Card ID <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
                     <div className="relative">
-                      <CreditCard className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="register-hospital-card"
-                        placeholder="e.g., HC-2025-001"
-                        className="pl-10"
+                      <input
+                        type="text"
+                        className={inputWithIconLeft}
+                        placeholder="e.g. HC-109482"
                         value={registerData.hospitalCardId}
                         onChange={(e) => setRegisterData({ ...registerData, hospitalCardId: e.target.value })}
                       />
+                      <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      If you already have a hospital card, enter the ID here to link your account
-                    </p>
                   </div>
+                </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="register-gender">Gender</Label>
-                    <select
-                      id="register-gender"
-                      value={registerData.gender}
-                      onChange={(e) => setRegisterData({ ...registerData, gender: e.target.value })}
-                      className="w-full rounded-md border px-3 py-2 bg-transparent"
-                    >
-                      <option value="">Select gender</option>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      {/* <option value="other">Other</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option> */}
-                    </select>
-                  </div>
+                {/* Step 1 Actions */}
+                <div className="pt-6 mt-2 border-t border-slate-50 flex flex-col sm:flex-row-reverse gap-3">
+                  <button
+                    type="button"
+                    onClick={() => goToStep(2)}
+                    className="w-full sm:w-auto flex-1 px-6 py-3 bg-slate-900 text-white rounded-xl text-sm font-semibold hover:bg-slate-800 transition-colors shadow-md focus:ring-4 focus:ring-slate-900/10 outline-none flex items-center justify-center gap-2"
+                  >
+                    Continue to Security
+                    <ArrowRight className="w-[18px] h-[18px] stroke-[1.5]" />
+                  </button>
+                  <Link
+                    to="/"
+                    className="w-full sm:w-auto px-6 py-3 bg-white text-slate-600 border border-slate-200/80 rounded-xl text-sm font-medium hover:bg-slate-50 hover:text-slate-900 transition-colors outline-none focus:ring-4 focus:ring-slate-100 text-center no-underline"
+                  >
+                    Cancel
+                  </Link>
+                </div>
+              </div>
+            )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="register-email">Email Address</Label>
+            {/* STEP 2: Contact & Security */}
+            {regStep === 2 && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-50">
+                  <h2 className="text-sm font-semibold text-slate-900">Contact &amp; Security</h2>
+                  <span className="text-xs font-medium text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">Step 2 of 2</span>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Email */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                      Email Address <span className="text-red-400">*</span>
+                    </label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="register-email"
+                      <input
                         type="email"
-                        placeholder="john.doe@example.com"
-                        className="pl-10"
+                        className={inputWithIconLeft}
+                        placeholder="jane@example.com"
                         value={registerData.email}
                         onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
                         required
                       />
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="register-password">Password</Label>
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">Phone Number</label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="register-password"
-                        type="password"
-                        placeholder="Minimum 6 characters"
-                        className="pl-10"
+                      <input
+                        type="tel"
+                        className={inputWithIconLeft}
+                        placeholder="+233 XX XXX XXXX"
+                        value={registerData.phone}
+                        onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
+                      />
+                      <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
+                    </div>
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                      Password <span className="text-red-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        className={inputWithIconLeft + " pr-12"}
+                        placeholder="Create a strong password"
                         value={registerData.password}
                         onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
                         required
                       />
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                      >
+                        {showPassword ? <EyeOff className="w-[18px] h-[18px] stroke-[1.5]" /> : <Eye className="w-[18px] h-[18px] stroke-[1.5]" />}
+                      </button>
+                    </div>
+
+                    {/* Strength Indicator */}
+                    <div className="mt-2.5 px-1">
+                      <div className="flex gap-1.5 h-[3px] w-full max-w-[220px]">
+                        {[1, 2, 3, 4].map((i) => (
+                          <div
+                            key={i}
+                            className={`h-full flex-1 rounded-full transition-colors duration-300 ${
+                              i <= passwordStrength.level
+                                ? (strengthBarColors[passwordStrength.color] || 'bg-slate-200')
+                                : 'bg-slate-200'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className={`text-[11px] font-medium mt-1.5 tracking-tight ${strengthTextColors[passwordStrength.color] || 'text-slate-400'}`}>
+                        {passwordStrength.label}
+                      </p>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="register-confirm-password">Confirm Password</Label>
+                  {/* Confirm Password */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">
+                      Confirm Password <span className="text-red-400">*</span>
+                    </label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="register-confirm-password"
-                        type="password"
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        className={inputWithIconLeft + " pr-12"}
                         placeholder="Re-enter your password"
-                        className="pl-10"
                         value={registerData.confirmPassword}
                         onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
                         required
                       />
+                      <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-[18px] h-[18px] stroke-[1.5]" /> : <Eye className="w-[18px] h-[18px] stroke-[1.5]" />}
+                      </button>
                     </div>
                   </div>
+                </div>
 
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? "Creating account..." : "Create Account"}
-                  </Button>
+                {/* Step 2 Actions */}
+                <div className="pt-6 mt-2 border-t border-slate-50 flex flex-col sm:flex-row-reverse gap-3">
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full sm:w-auto flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-md shadow-blue-600/20 focus:ring-4 focus:ring-blue-600/20 outline-none flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {isLoading ? "Creating Account..." : "Create Account"}
+                    {!isLoading && <UserRoundCheck className="w-[18px] h-[18px] stroke-[1.5]" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => goToStep(1)}
+                    className="w-full sm:w-auto px-6 py-3 bg-white text-slate-600 border border-slate-200/80 rounded-xl text-sm font-medium hover:bg-slate-50 hover:text-slate-900 transition-colors outline-none focus:ring-4 focus:ring-slate-100"
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
+          </form>
+        )}
 
-                  {/* <div className="text-center text-sm text-muted-foreground">
-                    Already have an account?{" "}
-                    <span className="text-primary cursor-pointer hover:underline">
-                      Login here
-                    </span>
-                  </div> */}
-                </form>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Reset Password Dialog */}
-        <Dialog open={showResetPassword} onOpenChange={setShowResetPassword}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Reset Password</DialogTitle>
-              <DialogDescription>
-                Enter your email address and we'll send you a link to reset your password.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleResetPassword}>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="reset-email">Email Address</Label>
+        {/* ========== LOGIN FORM ========== */}
+        {flow === 'login' && (
+          <form onSubmit={handleLogin} className="p-6 sm:p-8">
+            <div className="space-y-6 animate-fade-in">
+              <div className="space-y-4">
+                {/* Login Email */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1.5 ml-1">Email Address</label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="reset-email"
+                    <input
                       type="email"
-                      placeholder="your.email@example.com"
-                      className="pl-10"
-                      value={resetEmail}
-                      onChange={(e) => setResetEmail(e.target.value)}
+                      className={inputWithIconLeft}
+                      placeholder="jane@example.com"
+                      value={loginData.phone}
+                      onChange={(e) => setLoginData({ ...loginData, phone: e.target.value })}
                       required
                     />
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
+                  </div>
+                </div>
+
+                {/* Login Password */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5 px-1">
+                    <label className="block text-xs font-medium text-slate-600">Password</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(true)}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showLoginPassword ? "text" : "password"}
+                      className={inputWithIconLeft + " pr-12"}
+                      placeholder="Enter your password"
+                      value={loginData.password}
+                      onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                      required
+                    />
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400 stroke-[1.5]" />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                    >
+                      {showLoginPassword ? <EyeOff className="w-[18px] h-[18px] stroke-[1.5]" /> : <Eye className="w-[18px] h-[18px] stroke-[1.5]" />}
+                    </button>
                   </div>
                 </div>
               </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setShowResetPassword(false);
-                    setResetEmail("");
-                  }}
-                  disabled={resetLoading}
+
+              {/* Sign In Button */}
+              <div className="pt-6 mt-2 border-t border-slate-50">
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-md shadow-blue-600/20 focus:ring-4 focus:ring-blue-600/20 outline-none flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={resetLoading}>
-                  {resetLoading ? "Sending..." : "Send Reset Link"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                  {isLoading ? "Signing in..." : "Sign In"}
+                  {!isLoading && <LogIn className="w-[18px] h-[18px] stroke-[1.5]" />}
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
       </div>
+
+      {/* Register Footer */}
+      {flow === 'register' && (
+        <div className="mt-8 text-center animate-fade-in">
+          <p className="text-sm text-slate-500 font-medium">
+            Already have an account?{' '}
+            <button
+              type="button"
+              onClick={() => { setFlow('login'); setRegStep(1); }}
+              className="text-slate-900 hover:text-blue-600 transition-colors ml-1 hover:underline underline-offset-4 decoration-2 decoration-blue-200 hover:decoration-blue-600 font-medium"
+            >
+              Sign in here
+            </button>
+          </p>
+        </div>
+      )}
+
+      {/* Login Footer */}
+      {flow === 'login' && (
+        <div className="mt-8 text-center animate-fade-in">
+          <p className="text-sm text-slate-500 font-medium">
+            Don't have an account?{' '}
+            <button
+              type="button"
+              onClick={() => setFlow('register')}
+              className="text-slate-900 hover:text-blue-600 transition-colors ml-1 hover:underline underline-offset-4 decoration-2 decoration-blue-200 hover:decoration-blue-600 font-medium"
+            >
+              Create one here
+            </button>
+          </p>
+        </div>
+      )}
+
+      {/* Back to Home Link */}
+      <div className="mt-4 text-center">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors no-underline"
+        >
+          <ArrowLeft className="w-3.5 h-3.5 stroke-[1.5]" />
+          Back to Home
+        </Link>
+      </div>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={showResetPassword} onOpenChange={setShowResetPassword}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Enter your email address and we'll send you a link to reset your password.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleResetPassword}>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email Address</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="reset-email"
+                    type="email"
+                    placeholder="your.email@example.com"
+                    className="pl-10"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowResetPassword(false);
+                  setResetEmail("");
+                }}
+                disabled={resetLoading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={resetLoading}>
+                {resetLoading ? "Sending..." : "Send Reset Link"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

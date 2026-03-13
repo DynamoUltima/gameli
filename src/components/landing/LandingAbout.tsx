@@ -1,4 +1,5 @@
 import { ArrowUpRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export function LandingAbout() {
     return (
@@ -62,10 +63,10 @@ export function LandingAbout() {
                             satisfying medical care experience with our trusted professionals.
                         </p>
 
-                        <button className="inline-flex items-center gap-3 px-8 py-4 rounded-full border border-slate-200 text-base font-medium text-slate-900 hover:bg-slate-50 transition-colors shadow-sm">
-                            Read more
+                        <Link to="/auth" className="inline-flex items-center gap-3 px-8 py-4 rounded-full border border-slate-200 text-base font-medium text-slate-900 hover:bg-slate-50 transition-colors shadow-sm no-underline">
+                            Login / Register
                             <ArrowUpRight className="w-4 h-4 stroke-[1.5px]" />
-                        </button>
+                        </Link>
                     </div>
 
                     {/* Floating Team Cards */}

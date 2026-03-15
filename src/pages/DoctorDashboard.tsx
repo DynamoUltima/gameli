@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { format } from "date-fns";
 
 interface Notification {
   id: string;
@@ -147,13 +148,16 @@ const DoctorDashboard = () => {
       if (patientIds.length > 0) {
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
-          .select('id, full_name, phone')
+          .select('id, full_name, first_name, last_name, phone')
           .in('id', patientIds);
 
         if (profilesError) {
           console.error('Error fetching patient profiles:', profilesError);
         } else if (profiles) {
           profiles.forEach((profile: any) => {
+            if (!profile.full_name) {
+              profile.full_name = `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || null;
+            }
             patientProfilesMap.set(profile.id, profile);
           });
         }
@@ -315,6 +319,41 @@ const DoctorDashboard = () => {
           end_time: endStr
         });
       }
+    }
+
+    // Check for overlapping or duplicate slots before inserting
+    const conflicts: string[] = [];
+    for (const newSlot of inserts) {
+      const existingSlotsForDay = availabilitySlots.filter(existing =>
+        existing.date === newSlot.date || 
+        (!existing.date && !newSlot.date && existing.day_of_week === newSlot.day_of_week)
+      );
+
+      for (const existing of existingSlotsForDay) {
+        if (!existing.start_time || !existing.end_time) continue;
+        
+        const existStart = existing.start_time.substring(0, 5);
+        const existEnd = existing.end_time.substring(0, 5);
+        const newStart = newSlot.start_time.substring(0, 5);
+        const newEnd = newSlot.end_time.substring(0, 5);
+
+        // Check for overlap: two ranges overlap if start1 < end2 AND start2 < end1
+        if (newStart < existEnd && existStart < newEnd) {
+          const dayLabel = newSlot.date || newSlot.day_of_week;
+          conflicts.push(`${dayLabel}: ${formatTimeStr(existing.start_time)} – ${formatTimeStr(existing.end_time)}`);
+        }
+      }
+    }
+
+    if (conflicts.length > 0) {
+      const uniqueConflicts = [...new Set(conflicts)];
+      toast({
+        title: "Conflicting time slots",
+        description: `The new slot overlaps with existing availability:\n${uniqueConflicts.slice(0, 3).join(', ')}${uniqueConflicts.length > 3 ? ` and ${uniqueConflicts.length - 3} more` : ''}`,
+        variant: "destructive"
+      });
+      setIsAddingSlot(false);
+      return;
     }
 
     const { data, error } = await supabase
@@ -1002,13 +1041,19 @@ const DoctorDashboard = () => {
                               >
                                 <div className="flex items-center gap-3 flex-1">
                                   <Avatar className="h-10 w-10">
-                                    <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                                      {apt.profiles?.full_name?.split(' ').map((n: string) => n[0]).join('') || 'PT'}
+                                    <AvatarFallback className="bg-primary text-primary-foreground text-xs uppercase">
+                                      {(() => {
+                                        const name = apt.profiles?.full_name || apt.patient_name || "";
+                                        if (!name) return "PT";
+                                        return name.split(/\s+/).filter(Boolean).map((n: string) => n[0]).slice(0, 2).join('');
+                                      })()}
                                     </AvatarFallback>
                                   </Avatar>
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2">
-                                      <p className="font-medium text-sm">{apt.profiles?.full_name || 'Patient'}</p>
+                                      <p className="font-medium text-sm">
+                                        {apt.profiles?.full_name || apt.patient_name || 'Patient'}
+                                      </p>
                                       <Badge
                                         variant={getStatusVariant(apt.status || 'pending')}
                                         className="text-xs"
@@ -1266,22 +1311,46 @@ const DoctorDashboard = () => {
                   {availabilitySlots
                     .filter(slot => slot.date === getDateString(selectedDate) || (!slot.date && slot.day_of_week === selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()))
                     .sort((a,b) => a.start_time.localeCompare(b.start_time))
-                    .map((slot, index) => (
-                    <div key={slot.id || index} className="group flex items-center justify-between bg-background rounded-lg px-3 py-2 border border-border hover:border-muted-foreground/30 transition-colors">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">{formatTimeStr(slot.start_time)} - {formatTimeStr(slot.end_time)}</span>
-                      </div>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => handleDeleteSlot(slot.id)}
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
+                    .map((slot, index) => {
+                      const slotDate = slot.date || getDateString(selectedDate);
+                      const isBooked = allAppointments.some(appt => {
+                        if (appt.status === 'cancelled') return false;
+                        if (!appt.scheduled_at) return false;
+                        
+                        const apptDate = format(new Date(appt.scheduled_at), 'yyyy-MM-dd');
+                        if (apptDate !== slotDate) return false;
+                        
+                        if (!slot.start_time || !slot.end_time) return false;
+                        
+                        const apptTime = format(new Date(appt.scheduled_at), 'HH:mm');
+                        const slotStart = slot.start_time.substring(0, 5);
+                        const slotEnd = slot.end_time.substring(0, 5);
+                        
+                        return apptTime >= slotStart && apptTime < slotEnd;
+                      });
+
+                      return (
+                        <div key={slot.id || index} className="group flex items-center justify-between bg-background rounded-lg px-3 py-2 border border-border hover:border-muted-foreground/30 transition-colors">
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">{formatTimeStr(slot.start_time)} - {formatTimeStr(slot.end_time)}</span>
+                            {isBooked && (
+                              <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                Booked
+                              </span>
+                            )}
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handleDeleteSlot(slot.id)}
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
                   
                   {availabilitySlots.filter(slot => slot.date === getDateString(selectedDate) || (!slot.date && slot.day_of_week === selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase())).length === 0 && (
                     <div className="text-center py-4 bg-muted/10 rounded-lg border border-border text-xs text-muted-foreground">

@@ -33,7 +33,7 @@ export function LandingConsultation({ onBookClick }: Props) {
                         <div className="w-14 h-14 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-900 mb-8 group-hover:scale-110 transition-transform duration-500 shadow-sm">
                             <Laptop className="w-7 h-7 stroke-[1.5px]" />
                         </div>
-                        <h3 className="text-2xl font-medium text-slate-900 tracking-tight mb-4 leading-tight">Telemedicine<br />Consultation</h3>
+                        <h3 className="text-2xl font-medium text-slate-900 tracking-tight mb-4 leading-tight">Online<br />consultation</h3>
                         <p className="text-base font-normal text-slate-600 leading-relaxed mb-12 tracking-tight">Convenient virtual care from anywhere.</p>
                     </div>
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 group-hover:gap-3 transition-all duration-300">

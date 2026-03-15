@@ -551,14 +551,16 @@ const AdminDashboard = () => {
           for (const apt of pendingAppointments) {
             const { data: patient } = await supabase
               .from('profiles')
-              .select('full_name')
+              .select('full_name, first_name, last_name')
               .eq('id', apt.patient_id)
               .single();
+
+            const pName = patient?.full_name || (patient?.first_name ? `${patient.first_name} ${patient.last_name || ''}`.trim() : null) || 'Patient';
 
             notificationsList.push({
               id: apt.id,
               type: 'pending',
-              message: `New appointment request from ${patient?.full_name || 'Patient'}`,
+              message: `New appointment request from ${pName}`,
               time: apt.created_at,
               icon: 'clock'
             });
@@ -581,14 +583,16 @@ const AdminDashboard = () => {
           for (const apt of confirmedAppointments) {
             const { data: patient } = await supabase
               .from('profiles')
-              .select('full_name')
+              .select('full_name, first_name, last_name')
               .eq('id', apt.patient_id)
               .single();
+
+            const pName = patient?.full_name || (patient?.first_name ? `${patient.first_name} ${patient.last_name || ''}`.trim() : null) || 'Patient';
 
             notificationsList.push({
               id: `confirmed-${apt.id}`,
               type: 'confirmed',
-              message: `Appointment confirmed for ${patient?.full_name || 'Patient'}`,
+              message: `Appointment confirmed for ${pName}`,
               time: apt.created_at,
               icon: 'check'
             });
@@ -1212,6 +1216,29 @@ const AdminDashboard = () => {
   // Add new availability slot
   const addAvailabilitySlot = async () => {
     if (!selectedDoctor) return;
+
+    // Check for overlap/duplicates in local state before inserting
+    const hasConflict = doctorAvailability.some(existing => {
+      if (existing.day_of_week !== newAvailability.dayOfWeek) return false;
+      if (!existing.start_time || !existing.end_time) return false;
+      
+      const existStart = existing.start_time.substring(0, 5);
+      const existEnd = existing.end_time.substring(0, 5);
+      const newStart = newAvailability.startTime;
+      const newEnd = newAvailability.endTime;
+      
+      // Overlap: start1 < end2 AND start2 < end1
+      return newStart < existEnd && existStart < newEnd;
+    });
+
+    if (hasConflict) {
+      toast({
+        title: "Conflict detected",
+        description: "This time slot overlaps with an existing availability for this doctor on the selected day.",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
       const { error } = await supabase

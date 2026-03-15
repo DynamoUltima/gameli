@@ -74,7 +74,7 @@ export function LandingFooter() {
                 </div>
                 <div className="w-full h-px bg-white/10"></div>
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-white/50 text-xs font-medium">
-                    <p>© 2024 St. Gamaliel Hospital. All rights reserved.</p>
+                    <p>© {new Date().getFullYear()} St. Gamaliel Hospital. All rights reserved.</p>
                     <div className="flex items-center gap-6">
                         <a href="#" className="hover:text-white transition-colors">Terms</a>
                         <a href="#" className="hover:text-white transition-colors">Privacy</a>

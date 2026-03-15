@@ -17,7 +17,7 @@ export function LandingServices({ onBookClick }: Props) {
                         <h2 className="text-4xl sm:text-5xl lg:text-5xl font-medium text-slate-900 tracking-tighter uppercase leading-[1.1] mb-6 max-w-sm">
                             Discover Our Signature
                             <br />
-                            Medical Services
+                            Medical Departments
                         </h2>
                     </div>
 

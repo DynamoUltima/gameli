@@ -8,6 +8,7 @@ import { PatientQuickActions } from "@/components/patient-dashboard/PatientQuick
 import { PatientAppointments } from "@/components/patient-dashboard/PatientAppointments";
 import { PatientProfileCard } from "@/components/patient-dashboard/PatientProfileCard";
 import { PatientBookingModal } from "@/components/patient-dashboard/PatientBookingModal";
+import { PatientAppointmentHistoryModal } from "@/components/patient-dashboard/PatientAppointmentHistoryModal";
 import { FertilityIntakeForm } from "@/components/patient-dashboard/FertilityIntakeForm";
 
 import { CheckCircle, XCircle, AlertCircle, Bell, ClipboardList, Calendar } from "lucide-react";
@@ -35,6 +36,7 @@ const PatientDashboard = () => {
   const { user, signOut } = useAuth(true);
   const [fullName, setFullName] = useState<string>("");
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [pastAppointments, setPastAppointments] = useState<any[]>([]);
   const [loadingAppointments, setLoadingAppointments] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -59,6 +61,9 @@ const PatientDashboard = () => {
   // Booking Modal State
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [bookingType, setBookingType] = useState<string | null>(null);
+
+  // History Modal State
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   // Form State
   const [activeView, setActiveView] = useState<'dashboard' | 'form'>('dashboard');
@@ -121,20 +126,28 @@ const PatientDashboard = () => {
         .from('appointments')
         .select('*')
         .eq('patient_id', user.id)
-        .not('status', 'in', '(cancelled,completed)')
-        .order('scheduled_at', { ascending: true });
+        .order('scheduled_at', { ascending: false });
 
       if (appointmentsError) throw appointmentsError;
 
-      // Show appointments from start of today, OR any pending/confirmed appointment.
-      const filtered = (appointmentsData || []).filter(apt => {
+      // Filter upcoming vs past appointments
+      const upcoming = (appointmentsData || []).filter(apt => {
         const isPendingOrConfirmed = apt.status === 'pending' || apt.status === 'confirmed';
         const isFromToday = new Date(apt.scheduled_at) >= startOfToday;
-        return isPendingOrConfirmed || isFromToday;
+        return (isPendingOrConfirmed || isFromToday) && apt.status !== 'cancelled' && apt.status !== 'completed';
       });
 
-      const enrichedAppointments = await Promise.all(
-        filtered.map(async (apt) => {
+      // Sort upcoming in ascending order (closest first)
+      upcoming.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+
+      const past = (appointmentsData || []).filter(apt => {
+        const isPendingOrConfirmed = apt.status === 'pending' || apt.status === 'confirmed';
+        const isFromToday = new Date(apt.scheduled_at) >= startOfToday;
+        return apt.status === 'completed' || apt.status === 'cancelled' || (!isPendingOrConfirmed && !isFromToday);
+      });
+
+      const enrichedUpcoming = await Promise.all(
+        upcoming.map(async (apt) => {
           const { data: doctorProfile } = await supabase
             .from('profiles')
             .select('full_name')
@@ -154,7 +167,31 @@ const PatientDashboard = () => {
           };
         })
       );
-      setAppointments(enrichedAppointments || []);
+
+      const enrichedPast = await Promise.all(
+        past.map(async (apt) => {
+          const { data: doctorProfile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', apt.doctor_id)
+            .single();
+
+          const { data: specialty } = await supabase
+            .from('specialties')
+            .select('name')
+            .eq('id', apt.specialty_id)
+            .single();
+
+          return {
+            ...apt,
+            doctor_profile: doctorProfile,
+            specialty: specialty
+          };
+        })
+      );
+
+      setAppointments(enrichedUpcoming || []);
+      setPastAppointments(enrichedPast || []);
     } catch (error) {
       console.error('Error fetching appointments:', error);
     } finally {
@@ -469,9 +506,11 @@ const PatientDashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 min-h-[500px]">
           <div className="lg:col-span-2">
             <PatientAppointments
-              appointments={appointments}
+              upcomingAppointments={appointments}
+              pastAppointments={pastAppointments}
               loadingAppointments={loadingAppointments}
               onOpenBooking={handleOpenBooking}
+              onOpenHistory={() => setIsHistoryModalOpen(true)}
               formatDate={formatDate}
               formatTime={formatTime}
             />
@@ -499,6 +538,14 @@ const PatientDashboard = () => {
         patientName={fullName}
         patientPhone={profileData.phone}
         patientEmail={user?.email}
+      />
+
+      <PatientAppointmentHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        appointments={pastAppointments}
+        formatDate={formatDate}
+        formatTime={formatTime}
       />
 
       {/* Edit Profile Dialog */}

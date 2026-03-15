@@ -85,7 +85,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
                   <div className="flex flex-col gap-1">
                     <button
                       onClick={(e) => {
-                        onBookClick('General Checkups', 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=800');
+                        onBookClick('Online Consultation', 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=800');
                         toggleServicesMenu(e);
                       }}
                       className="group/item flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors text-left"
@@ -95,8 +95,8 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
                           <Stethoscope className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">General Medicine</p>
-                          <p className="text-xs text-slate-500">Checkups & Diagnostics</p>
+                          <p className="text-sm font-semibold text-slate-900">Online consultation</p>
+                          <p className="text-xs text-slate-500">Virtual Care & Diagnostics</p>
                         </div>
                       </div>
                       <ArrowRight className="w-5 h-5 text-slate-300 group-hover/item:text-slate-900 transition-colors" />
@@ -104,7 +104,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
 
                     <button
                       onClick={(e) => {
-                        onBookClick('Specialist Care', 'https://images.unsplash.com/photo-1551076805-e166946c9ebf?auto=format&fit=crop&q=80&w=800');
+                        onBookClick('Home Visit', 'https://images.unsplash.com/photo-1551076805-e166946c9ebf?auto=format&fit=crop&q=80&w=800');
                         toggleServicesMenu(e);
                       }}
                       className="group/item flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors text-left"
@@ -114,8 +114,8 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
                           <HeartPulse className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">Specialized Care</p>
-                          <p className="text-xs text-slate-500">Cardiology & Surgery</p>
+                          <p className="text-sm font-semibold text-slate-900">Home Visit</p>
+                          <p className="text-xs text-slate-500">Personalized Home Care</p>
                         </div>
                       </div>
                       <ArrowRight className="w-5 h-5 text-slate-300 group-hover/item:text-slate-900 transition-colors" />
@@ -123,7 +123,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
 
                     <button
                       onClick={(e) => {
-                        onBookClick('Emergency Care', 'https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&q=80&w=800');
+                        onBookClick('Hospital Visit', 'https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&q=80&w=800');
                         toggleServicesMenu(e);
                       }}
                       className="group/item flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors text-left"
@@ -133,8 +133,8 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
                           <AlertCircle className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">Emergency Services</p>
-                          <p className="text-xs text-slate-500">24/7 Care & Trauma</p>
+                          <p className="text-sm font-semibold text-slate-900">Hospital Visit</p>
+                          <p className="text-xs text-slate-500">Full Hospital Facilities</p>
                         </div>
                       </div>
                       <ArrowRight className="w-5 h-5 text-slate-300 group-hover/item:text-slate-900 transition-colors" />

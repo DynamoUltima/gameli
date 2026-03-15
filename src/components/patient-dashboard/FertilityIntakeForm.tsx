@@ -322,7 +322,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
               </div>
 
               <div className="space-y-3">
-                <div class="flex items-center justify-between gap-4">
+                <div className="flex items-center justify-between gap-4">
                   <label className="text-sm font-medium text-slate-700">Do you smoke?</label>
                   <RadioGroup name="soc_smk" options={['Yes', 'No']} />
                 </div>

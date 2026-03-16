@@ -377,7 +377,7 @@ const Auth = () => {
       <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8 text-center animate-fade-in">
-          <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
+          <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
           <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-slate-900 mb-2">
             Set New Password
           </h1>
@@ -476,7 +476,7 @@ const Auth = () => {
       {/* Register Header */}
       {flow === 'register' && (
         <div className="mb-8 text-center animate-fade-in">
-          <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
+          <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
           <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-slate-900 mb-2">
             Create your account
           </h1>
@@ -489,7 +489,7 @@ const Auth = () => {
       {/* Login Header */}
       {flow === 'login' && (
         <div className="mb-8 text-center animate-fade-in">
-          <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
+          <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-14 h-14 object-contain rounded-full shadow-sm border border-slate-100 mb-4 mx-auto" />
           <h1 className="text-2xl sm:text-3xl font-medium tracking-tight text-slate-900 mb-2">
             Welcome back
           </h1>

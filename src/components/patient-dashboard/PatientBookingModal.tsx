@@ -497,7 +497,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                                 <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 max-h-96 overflow-y-auto hide-scrollbar">
                                                     <div className="sticky top-0 bg-white dark:bg-slate-900 pb-3 border-b border-slate-100 dark:border-slate-800 z-10 mb-4">
                                                         <h5 className="text-lg font-medium text-slate-900 dark:text-white tracking-tight">Male Questionnaire Placeholder</h5>
-                                                        <p className="text-xs text-slate-500 mt-1">St Gamaliel's Hospital - Quick Intake</p>
+                                                        <p className="text-xs text-slate-500 mt-1">St. Gamaliel's Hospital - Quick Intake</p>
                                                     </div>
                                                     <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-xl text-xs flex gap-2 items-start">
                                                         <Info className="w-5 h-5 shrink-0" />
@@ -510,7 +510,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                                 <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 max-h-96 overflow-y-auto hide-scrollbar">
                                                     <div className="sticky top-0 bg-white dark:bg-slate-900 pb-3 border-b border-slate-100 dark:border-slate-800 z-10 mb-4">
                                                         <h5 className="text-lg font-medium text-slate-900 dark:text-white tracking-tight">Female Questionnaire Placeholder</h5>
-                                                        <p className="text-xs text-slate-500 mt-1">St Gamaliel's Hospital - Quick Intake</p>
+                                                        <p className="text-xs text-slate-500 mt-1">St. Gamaliel's Hospital - Quick Intake</p>
                                                     </div>
                                                     <div className="p-3 bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-400 rounded-xl text-xs flex gap-2 items-start">
                                                         <Info className="w-5 h-5 shrink-0" />

@@ -99,7 +99,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
         </button>
         <div className="flex items-center gap-2 text-sm font-medium text-blue-600 mb-3 bg-blue-50 w-fit px-3 py-1.5 rounded-lg border border-blue-100">
           <Building2 className="w-4 h-4" />
-          St Gamaliel's Hospital
+          St. Gamaliel's Hospital
         </div>
         <h1 className="text-3xl sm:text-4xl font-medium tracking-tight text-slate-900 mb-3">
           {title}

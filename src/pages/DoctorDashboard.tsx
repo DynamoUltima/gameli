@@ -727,7 +727,7 @@ const DoctorDashboard = () => {
       <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm" />
+            <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm" />
             <span className="text-xl font-bold text-foreground">St. Gamaliel's Hospital</span>
           </div>
           <div className="flex items-center gap-3">

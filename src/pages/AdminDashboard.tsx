@@ -1927,7 +1927,7 @@ const AdminDashboard = () => {
         <div className="p-6 border-b border-sidebar-border">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
-              <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm" />
+              <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm" />
               <div>
                 <h1 className="font-bold text-sidebar-foreground">St. Gamaliel's Hospital</h1>
                 <p className="text-xs text-muted-foreground">Admin Dashboard</p>

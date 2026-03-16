@@ -62,8 +62,8 @@ export function LandingContactModal({ isOpen, onClose }: Props) {
                                 <div>
                                     <p className="text-sm font-semibold mb-1 tracking-tight">Chat with us</p>
                                     <p className="text-xs text-white/60 mb-1.5 font-normal">Our friendly team is here to help.</p>
-                                    <a href="mailto:hello@dental.com" className="text-sm font-medium hover:text-white/80 transition-colors">
-                                        hello@dental.com
+                                    <a href="mailto:support@gamalielshospital.com" className="text-sm font-medium hover:text-white/80 transition-colors">
+                                        support@gamalielshospital.com
                                     </a>
                                 </div>
                             </div>
@@ -76,9 +76,11 @@ export function LandingContactModal({ isOpen, onClose }: Props) {
                                     <p className="text-sm font-semibold mb-1 tracking-tight">Visit us</p>
                                     <p className="text-xs text-white/60 mb-1.5 font-normal">Come say hello at our clinic HQ.</p>
                                     <p className="text-sm font-medium leading-relaxed">
-                                        100 Smith Street
+                                        St. Gamaliel's Hospital,
                                         <br />
-                                        Collingwood VIC 3066 AU
+                                        Amrahia (Near Greenfields Estate),
+                                        <br />
+                                        Accra, Ghana
                                     </p>
                                 </div>
                             </div>
@@ -90,8 +92,8 @@ export function LandingContactModal({ isOpen, onClose }: Props) {
                                 <div>
                                     <p className="text-sm font-semibold mb-1 tracking-tight">Call us</p>
                                     <p className="text-xs text-white/60 mb-1.5 font-normal">Mon-Fri from 8am to 5pm.</p>
-                                    <a href="tel:+15550000000" className="text-sm font-medium hover:text-white/80 transition-colors">
-                                        +1 (555) 000-0000
+                                    <a href="tel:0533675498" className="text-sm font-medium hover:text-white/80 transition-colors">
+                                        0533-675-498
                                     </a>
                                 </div>
                             </div>

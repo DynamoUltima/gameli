@@ -49,7 +49,7 @@ export function LandingAbout() {
                 <div className="flex flex-col h-full justify-between">
                     <div>
                         <p className="text-base font-medium text-slate-500 mb-4 tracking-tight">
-                            About St. Gamaliel /
+                            About St. Gamaliel's Hospital /
                         </p>
                         <h2 className="text-4xl sm:text-5xl lg:text-5xl font-medium text-slate-900 tracking-tighter uppercase leading-[1.1] mb-8">
                             Excellence In

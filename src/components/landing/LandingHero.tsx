@@ -57,8 +57,8 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
         <nav className="relative z-50 flex flex-wrap items-center justify-between w-full gap-4">
           {/* Logo */}
           <a href="#" className="flex items-center gap-3 text-white group">
-            <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-full shadow-md group-hover:scale-110 transition-transform duration-500" />
-            <span className="text-xl font-medium tracking-tight">St. Gamaliel</span>
+            <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-10 h-10 object-contain rounded-full shadow-md group-hover:scale-110 transition-transform duration-500" />
+            <span className="text-xl font-medium tracking-tight">St. Gamaliel's Hospital</span>
           </a>
 
           {/* Desktop Links */}
@@ -243,24 +243,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
               >&gt;</button>
             </div>
 
-            {/* Doctor Card */}
-            <div className="bg-white/95 backdrop-blur-sm rounded-[1.25rem] p-4 flex items-center gap-4 max-w-[22rem] shadow-xl w-full">
-              <img src="https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?auto=format&fit=crop&q=80&w=200" className="w-16 h-16 rounded-xl object-cover shadow-sm" alt="Dr. Jonas Suherman" />
-              <div>
-                <h3 className="text-lg font-medium text-slate-900 tracking-tight leading-snug mb-0.5">
-                  Dr. Jonas Suherman
-                </h3>
-                <p className="text-sm font-normal text-slate-500 mb-1.5">
-                  Chief Medical Officer
-                </p>
-                <p className="text-xs font-medium text-slate-700">
-                  15 year Experience
-                  <span className="text-slate-400 font-normal ml-0.5">
-                    (4.9 Rating)
-                  </span>
-                </p>
-              </div>
-            </div>
+
           </div>
         </div>
       </div>

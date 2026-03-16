@@ -7,8 +7,8 @@ export function LandingFooter() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-12 lg:gap-8">
                     <div className="lg:col-span-4 flex flex-col gap-6">
                         <a href="#" className="flex items-center gap-3 text-white group w-fit">
-                            <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-10 h-10 object-contain rounded-full shadow-md group-hover:scale-110 transition-transform duration-500" />
-                            <span className="text-xl font-medium tracking-tight">St. Gamaliel</span>
+                            <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-10 h-10 object-contain rounded-full shadow-md group-hover:scale-110 transition-transform duration-500" />
+                            <span className="text-xl font-medium tracking-tight">St. Gamaliel's Hospital</span>
                         </a>
                         <p className="text-white/70 text-base font-normal leading-relaxed max-w-sm">
                             Expert medical care for healthy, confident lives at every
@@ -45,7 +45,7 @@ export function LandingFooter() {
                     </div>
                     <div className="lg:col-span-2 flex flex-col gap-4">
                         <h4 className="text-xs font-semibold text-white tracking-widest uppercase mb-2">
-                            St. Gamaliel
+                            St. Gamaliel's Hospital
                         </h4>
                         <a href="#" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
                             About Us
@@ -74,7 +74,7 @@ export function LandingFooter() {
                 </div>
                 <div className="w-full h-px bg-white/10"></div>
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-white/50 text-xs font-medium">
-                    <p>© {new Date().getFullYear()} St. Gamaliel Hospital. All rights reserved.</p>
+                    <p>© {new Date().getFullYear()} St. Gamaliel's Hospital. All rights reserved.</p>
                     <div className="flex items-center gap-6">
                         <a href="#" className="hover:text-white transition-colors">Terms</a>
                         <a href="#" className="hover:text-white transition-colors">Privacy</a>

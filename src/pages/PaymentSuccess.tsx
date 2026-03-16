@@ -82,8 +82,8 @@ const PaymentSuccess = () => {
             <p className="text-sm text-muted-foreground">
               A video consultation link will be sent to you 15 minutes before your appointment.
               For any questions, contact us at{" "}
-              <a href="tel:+233XXXXXXXXX" className="text-primary hover:underline">
-                +233 XX XXX XXXX
+              <a href="tel:0533675498" className="text-primary hover:underline">
+                0533-675-498
               </a>
             </p>
           </div>

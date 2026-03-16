@@ -236,7 +236,7 @@ export function LandingBookingModal({ isOpen, onClose, serviceConfig, currentSte
 
                                 <div className="space-y-1.5">
                                     <label className="text-sm font-semibold text-slate-700 block">Phone Number</label>
-                                    <input type="tel" required className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-sm" placeholder="+1 (555) 000-0000" />
+                                    <input type="tel" required className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-sm" placeholder="0533-675-498" />
                                 </div>
 
                                 <div className="space-y-1.5">

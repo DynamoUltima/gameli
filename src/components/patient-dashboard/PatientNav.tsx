@@ -36,8 +36,8 @@ export const PatientNav = ({
                         className="flex items-center gap-3 text-slate-900 dark:text-white group cursor-pointer"
                         onClick={() => window.location.href = '/'}
                     >
-                        <img src="/logo.jpg" alt="St. Gamaliel Logo" className="w-8 h-8 rounded-md shadow-sm group-hover:scale-105 transition-transform duration-300 object-contain" />
-                        <span className="text-xl font-medium tracking-tight">St. Gamaliel Hospital</span>
+                        <img src="/logo.jpg" alt="St. Gamaliel's Hospital Logo" className="w-8 h-8 rounded-md shadow-sm group-hover:scale-105 transition-transform duration-300 object-contain" />
+                        <span className="text-xl font-medium tracking-tight">St. Gamaliel's Hospital</span>
                     </div>
 
                     <div className="hidden md:flex items-center gap-4 text-sm font-medium text-slate-500 dark:text-slate-400">

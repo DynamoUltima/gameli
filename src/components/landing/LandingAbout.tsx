@@ -69,44 +69,7 @@ export function LandingAbout() {
                         </Link>
                     </div>
 
-                    {/* Floating Team Cards */}
-                    <div className="flex items-end justify-end gap-5 mt-20 relative">
-                        {/* Smaller Card */}
-                        <div className="relative w-44 h-52 rounded-[1.5rem] overflow-hidden shadow-xl group cursor-pointer">
-                            <img src="https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&q=80&w=400" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Dr. Albert Flores" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-                            <div className="absolute bottom-5 left-5 right-5 text-white">
-                                <p className="text-base font-medium leading-tight mb-1 tracking-tight">
-                                    Dr. Albert Flores
-                                </p>
-                                <p className="text-sm font-normal text-white/70">
-                                    Pediatrics
-                                </p>
-                            </div>
-                            <div className="absolute bottom-5 right-4">
-                                <ArrowUpRight className="w-4 h-4 stroke-[1.5px]" />
-                            </div>
-                        </div>
 
-                        {/* Taller Card */}
-                        <div className="relative w-52 h-64 rounded-[1.5rem] overflow-hidden shadow-xl group cursor-pointer">
-                            <img src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=400" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Dr. Theresa Webb" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-                            <div className="absolute bottom-6 left-6 right-6 text-white">
-                                <p className="text-lg font-medium leading-tight mb-1 tracking-tight">
-                                    Dr. Theresa Webb
-                                </p>
-                                <p className="text-sm font-normal text-white/70">
-                                    Cardiology
-                                </p>
-                            </div>
-                            <div className="absolute bottom-6 right-5 z-10">
-                                <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center">
-                                    <ArrowUpRight className="w-4 h-4 text-white stroke-[1.5px]" />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </section>

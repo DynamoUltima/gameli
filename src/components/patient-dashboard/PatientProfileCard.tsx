@@ -47,7 +47,7 @@ export const PatientProfileCard = ({
                     <h3 className="text-2xl font-medium tracking-tight text-slate-900 dark:text-white mb-1">
                         {fullName || "James Bond"}
                     </h3>
-                    <p className="text-sm font-normal text-slate-500 dark:text-slate-400">Premium Patient</p>
+                    {/* <p className="text-sm font-normal text-slate-500 dark:text-slate-400">Premium Patient</p> */}
                     {profileData.hospital_card_id && (
                         <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-2 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
                             ID: {profileData.hospital_card_id}

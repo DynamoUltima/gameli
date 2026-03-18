@@ -15,14 +15,20 @@ import AdminDashboard from "./pages/AdminDashboard";
 import Auth from "./pages/Auth";
 import DoctorSchedulesPage from "./pages/DoctorSchedulesPage";
 
+import { GoogleOAuthProvider } from '@react-oauth/google';
+
 const queryClient = new QueryClient();
 
+// Use import.meta.env for Vite environment variables
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
+  <GoogleOAuthProvider clientId={googleClientId}>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/book/:type" element={<BookAppointment />} />
@@ -66,6 +72,7 @@ const App = () => (
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
+  </GoogleOAuthProvider>
 );
 
 export default App;

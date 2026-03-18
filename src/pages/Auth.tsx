@@ -33,7 +33,7 @@ const Auth = () => {
   const { role, loading: roleLoading } = useUserRole(currentUserId);
 
   // Flow state: 'register' or 'login'
-  const [flow, setFlow] = useState<'register' | 'login'>('register');
+  const [flow, setFlow] = useState<'register' | 'login'>('login');
   // Registration step
   const [regStep, setRegStep] = useState(1);
 

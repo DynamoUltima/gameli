@@ -155,9 +155,14 @@ export const PatientAppointments = ({
                                           </Badge>
                                       </div>
                                       {(apt.status === "pending" || apt.status === "confirmed") && apt.type === "online" && (
-                                          <Button className="w-full mt-5 rounded-xl border-slate-200 dark:border-slate-800 font-medium h-11 shadow-sm text-slate-900 dark:text-white dark:bg-slate-900 dark:hover:bg-slate-800" variant="outline">
+                                          <Button 
+                                            className="w-full mt-5 rounded-xl border-slate-200 dark:border-slate-800 font-medium h-11 shadow-sm text-slate-900 dark:text-white dark:bg-slate-900 dark:hover:bg-slate-800" 
+                                            variant={apt.meet_link ? "default" : "outline"}
+                                            onClick={() => apt.meet_link ? window.open(apt.meet_link, '_blank') : null}
+                                            disabled={!apt.meet_link}
+                                          >
                                               <Video className="w-4 h-4 mr-2" />
-                                              Join Video Call
+                                              {apt.meet_link ? "Join Video Call" : "Link Not Ready"}
                                           </Button>
                                       )}
                                   </div>

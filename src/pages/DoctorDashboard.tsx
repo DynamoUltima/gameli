@@ -4,13 +4,15 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList } from "lucide-react";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
+import { useGoogleLogin } from '@react-oauth/google';
 
 interface Notification {
   id: string;
@@ -30,6 +32,7 @@ const DoctorDashboard = () => {
     patient: string;
     time: string;
     type: "online" | "hospital" | "home";
+    meet_link?: string;
   }>>([]);
   const [allAppointments, setAllAppointments] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -39,6 +42,8 @@ const DoctorDashboard = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'patients'>('dashboard');
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null);
   const [isMonthExpanded, setIsMonthExpanded] = useState(false);
+  // Separate month state for the availability mini-calendar (independent of main calendar)
+  const [availMonth, setAvailMonth] = useState(new Date());
   const { toast } = useToast();
 
   const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
@@ -51,6 +56,11 @@ const DoctorDashboard = () => {
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string>("");
   const [currentNotes, setCurrentNotes] = useState<string>("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  // Per-appointment inline note editing (patient profile timeline)
+  const [editingNotes, setEditingNotes] = useState<Record<string, string>>({});
+  const [isSavingNoteId, setIsSavingNoteId] = useState<string | null>(null);
+  // Viewing a medical form questionnaire
+  const [viewingForm, setViewingForm] = useState<any | null>(null);
 
   // Pagination state for Today's Schedule
   const [currentPage, setCurrentPage] = useState(1);
@@ -59,6 +69,109 @@ const DoctorDashboard = () => {
   // Pagination state for Calendar Appointments
   const [calendarCurrentPage, setCalendarCurrentPage] = useState(1);
   const calendarAppointmentsPerPage = 5;
+
+  // Google Meet integration state
+  const [isGeneratingMeetLink, setIsGeneratingMeetLink] = useState<string | null>(null);
+
+  // Real-time overlap detection for the availability slot form
+  const slotConflict = useMemo(() => {
+    if (!newSlotStart || !newSlotEnd || newSlotEnd <= newSlotStart) return null;
+    // Assuming getDateString and formatTimeStr are defined elsewhere or will be added
+    const getDateString = (date: Date) => format(date, 'yyyy-MM-dd');
+    const formatTimeStr = (time: string) => time.substring(0, 5);
+
+    const dateStr = getDateString(selectedDate);
+    const dayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const slotsForDay = availabilitySlots.filter(s =>
+      s.date === dateStr || (!s.date && s.day_of_week === dayName)
+    );
+    for (const s of slotsForDay) {
+      if (!s.start_time || !s.end_time) continue;
+      const existStart = s.start_time.substring(0, 5);
+      const existEnd   = s.end_time.substring(0, 5);
+      if (newSlotStart < existEnd && existStart < newSlotEnd) {
+        return `Conflicts with existing slot: ${formatTimeStr(s.start_time)} – ${formatTimeStr(s.end_time)}`;
+      }
+    }
+    return null;
+  }, [newSlotStart, newSlotEnd, availabilitySlots, selectedDate]);
+
+  const generateMeetLink = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      if (!isGeneratingMeetLink) return;
+      const appointmentId = isGeneratingMeetLink;
+      
+      try {
+        const appointment = allAppointments.find(a => a.id === appointmentId);
+        if (!appointment) throw new Error("Appointment not found");
+
+        const startTime = new Date(appointment.scheduled_at);
+        const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour duration
+
+        // Call Google Calendar API
+        const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${tokenResponse.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            summary: `Medical Consultation: Dr. ${fullName || 'Doctor'} / ${appointment.profiles?.full_name || 'Patient'}`,
+            description: `Virtual consultation via Google Meet.\nConsultation notes/symptoms: ${appointment.symptoms || 'None provided'}`,
+            start: { dateTime: startTime.toISOString() },
+            end: { dateTime: endTime.toISOString() },
+            conferenceData: {
+              createRequest: {
+                requestId: `hms-consult-${appointmentId}-${Date.now()}`,
+                conferenceSolutionKey: { type: 'hangoutsMeet' }
+              }
+            }
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to create Google Calendar event');
+        }
+
+        const eventData = await res.json();
+        const meetLink = eventData.hangoutLink;
+
+        if (!meetLink) {
+          throw new Error('Google Meet link was not returned by the API');
+        }
+
+        // Save to Supabase
+        const { error: updateError } = await supabase
+          .from('appointments')
+          .update({ meet_link: meetLink })
+          .eq('id', appointmentId);
+
+        if (updateError) throw updateError;
+
+        toast({ title: "Success", description: "Google Meet link generated successfully." });
+        
+        // Update local state so it reflects immediately
+        setAllAppointments(prev => prev.map(apt => apt.id === appointmentId ? { ...apt, meet_link: meetLink } : apt));
+        setTodayAppointments(prev => prev.map(apt => apt.id === appointmentId ? { ...apt, meet_link: meetLink } : apt));
+      } catch (error) {
+        console.error("Error generating meet link:", error);
+        toast({ title: "Error", description: "Failed to generate Google Meet link.", variant: "destructive" });
+      } finally {
+        setIsGeneratingMeetLink(null);
+      }
+    },
+    onError: (error) => {
+      console.error("Google login failed", error);
+      toast({ title: "Authentication Failed", description: "Could not authenticate with Google.", variant: "destructive" });
+      setIsGeneratingMeetLink(null);
+    },
+    scope: 'https://www.googleapis.com/auth/calendar.events',
+  });
+
+  const handleCreateMeetLink = (appointmentId: string) => {
+    setIsGeneratingMeetLink(appointmentId);
+    generateMeetLink();
+  };
 
   useEffect(() => {
     const loadDoctor = async () => {
@@ -128,6 +241,13 @@ const DoctorDashboard = () => {
           specialties (
             id,
             name
+          ),
+          medical_forms (
+            id,
+            form_type,
+            status,
+            data,
+            created_at
           )
         `)
         .eq('doctor_id', user.id)
@@ -215,9 +335,10 @@ const DoctorDashboard = () => {
         const scheduledDate = new Date(apt.scheduled_at);
         return {
           id: apt.id,
-          patient: apt.profiles?.full_name || "Patient",
+          patient: apt.profiles?.full_name || apt.patient_name || "Patient",
           time: scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: apt.type || 'hospital',
+          meet_link: apt.meet_link,
         };
       }));
     };
@@ -408,7 +529,7 @@ const DoctorDashboard = () => {
 
   const handleSaveNotes = async () => {
     if (!selectedAppointmentId) {
-      toast({ title: "Select an appointment", description: "Please select an active patient appointment first." });
+      toast({ title: "Select an appointment", description: "Please select a patient appointment first." });
       return;
     }
     
@@ -422,12 +543,31 @@ const DoctorDashboard = () => {
       toast({ title: "Error saving notes", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Notes saved", description: "Clinical notes have been updated." });
-      // Update local state so it shows up immediately in history
       setAllAppointments(prev => prev.map(apt => 
         apt.id === selectedAppointmentId ? { ...apt, notes: currentNotes } : apt
       ));
     }
     setIsSavingNotes(false);
+  };
+
+  // Save notes inline from the patient profile timeline
+  const handleSaveAppointmentNote = async (aptId: string) => {
+    const notes = editingNotes[aptId] ?? allAppointments.find(a => a.id === aptId)?.notes ?? "";
+    setIsSavingNoteId(aptId);
+    const { error } = await supabase
+      .from('appointments')
+      .update({ notes })
+      .eq('id', aptId);
+
+    if (error) {
+      toast({ title: "Error saving notes", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Notes saved", description: "Clinical notes have been updated." });
+      setAllAppointments(prev => prev.map(apt =>
+        apt.id === aptId ? { ...apt, notes } : apt
+      ));
+    }
+    setIsSavingNoteId(null);
   };
 
   // Compute unique patients for the history table
@@ -722,7 +862,8 @@ const DoctorDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10">
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-secondary/10">
       {/* Header */}
       <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -1084,9 +1225,19 @@ const DoctorDashboard = () => {
                                 </div>
                                 <div className="flex items-center gap-2">
                                   {apt.type === "online" && apt.status !== 'cancelled' && (
-                                    <Button size="sm" variant="outline" title="Start video call">
-                                      <Video className="w-4 h-4" />
-                                    </Button>
+                                    <>
+                                      {apt.meet_link ? (
+                                        <Button size="sm" variant="default" title="Start video call" onClick={() => window.open(apt.meet_link, '_blank')}>
+                                          <Video className="w-4 h-4 mr-2" />
+                                          Join Meet
+                                        </Button>
+                                      ) : (
+                                        <Button size="sm" variant="outline" title="Create meeting link" disabled={isGeneratingMeetLink === apt.id} onClick={() => handleCreateMeetLink(apt.id)}>
+                                          <Video className="w-4 h-4 mr-2" />
+                                          {isGeneratingMeetLink === apt.id ? "Creating..." : "Create Link"}
+                                        </Button>
+                                      )}
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -1174,10 +1325,19 @@ const DoctorDashboard = () => {
                               </div>
                             </div>
                             {apt.type === "online" && (
-                              <Button size="sm">
-                                <Video className="w-4 h-4 mr-2" />
-                                Start
-                              </Button>
+                              <div className="flex flex-col gap-2">
+                                {apt.meet_link ? (
+                                  <Button size="sm" variant="default" onClick={() => window.open(apt.meet_link, '_blank')}>
+                                    <Video className="w-4 h-4 mr-2" />
+                                    Join
+                                  </Button>
+                                ) : (
+                                  <Button size="sm" variant="outline" disabled={isGeneratingMeetLink === apt.id} onClick={() => handleCreateMeetLink(apt.id)}>
+                                    <Video className="w-4 h-4 mr-2" />
+                                    {isGeneratingMeetLink === apt.id ? 'Creating...' : 'Create Link'}
+                                  </Button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -1246,17 +1406,37 @@ const DoctorDashboard = () => {
                 {/* Mini Calendar */}
                 <div className="bg-muted/30 rounded-xl p-4 border border-border">
                   <div className="flex items-center justify-between mb-3">
-                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded text-muted-foreground hover:text-foreground">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        if (isMonthExpanded) {
+                          setAvailMonth(new Date(availMonth.getFullYear(), availMonth.getMonth() - 1, 1));
+                        } else {
+                          const prev = new Date(selectedDate);
+                          prev.setDate(prev.getDate() - 7);
+                          setSelectedDate(prev);
+                          setAvailMonth(new Date(prev.getFullYear(), prev.getMonth(), 1));
+                        }
+                      }}
+                    >
                       <ChevronLeft className="w-4 h-4" />
                     </Button>
                     <span className="text-xs font-semibold">
-                      {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                      {availMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                     </span>
                     <Button 
                       variant="ghost" 
                       size="icon" 
                       className="h-6 w-6 rounded text-muted-foreground hover:text-foreground"
-                      onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                      onClick={() => {
+                        if (isMonthExpanded) {
+                          setAvailMonth(new Date(availMonth.getFullYear(), availMonth.getMonth() + 1, 1));
+                        } else {
+                          const next = new Date(selectedDate);
+                          next.setDate(next.getDate() + 7);
+                          setSelectedDate(next);
+                          setAvailMonth(new Date(next.getFullYear(), next.getMonth(), 1));
+                        }
+                      }}
                     >
                       <ChevronRight className="w-4 h-4" />
                     </Button>
@@ -1268,9 +1448,27 @@ const DoctorDashboard = () => {
                   </div>
                   <div className="grid grid-cols-7 gap-1">
                     {/* Mini calendar days */}
-                    {(isMonthExpanded ? Array.from({length: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()}, (_, i) => i + 1) : [selectedDate.getDate(), selectedDate.getDate()+1, selectedDate.getDate()+2, selectedDate.getDate()+3, selectedDate.getDate()+4, selectedDate.getDate()+5, selectedDate.getDate()+6]).map((day, i) => {
+                    {(() => {
+                      let daysToRender: number[];
+                      if (isMonthExpanded) {
+                        // All days in the current month
+                        const totalDays = new Date(availMonth.getFullYear(), availMonth.getMonth() + 1, 0).getDate();
+                        daysToRender = Array.from({ length: totalDays }, (_, i) => i + 1);
+                      } else {
+                        // 7 days of the current week (Sun – Sat) based on selectedDate
+                        const refDate = new Date(selectedDate);
+                        const sunday = new Date(refDate);
+                        sunday.setDate(refDate.getDate() - refDate.getDay());
+                        daysToRender = Array.from({ length: 7 }, (_, i) => {
+                          const d = new Date(sunday);
+                          d.setDate(sunday.getDate() + i);
+                          return d.getDate();
+                        });
+                      }
+                      return daysToRender;
+                    })().map((day, i) => {
                       // Adjust dummy sliding window for the mini view when not expanded
-                      const displayDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day);
+                      const displayDate = new Date(availMonth.getFullYear(), availMonth.getMonth(), day);
                       const isSelected = displayDate.toDateString() === selectedDate.toDateString();
                       const displayDateStr = getDateString(displayDate);
                       const displayDayName = displayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
@@ -1384,7 +1582,7 @@ const DoctorDashboard = () => {
                           type="time" 
                           value={newSlotStart}
                           onChange={(e) => setNewSlotStart(e.target.value)}
-                          className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer"
+                          className={`w-full bg-background border rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer ${slotConflict ? 'border-destructive' : 'border-input'}`}
                         />
                       </div>
                       <span className="text-muted-foreground hidden xl:block text-xs">to</span>
@@ -1393,18 +1591,30 @@ const DoctorDashboard = () => {
                           type="time" 
                           value={newSlotEnd}
                           onChange={(e) => setNewSlotEnd(e.target.value)}
-                          className="w-full bg-background border border-input rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer"
+                          className={`w-full bg-background border rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer ${slotConflict ? 'border-destructive' : 'border-input'}`}
                         />
                       </div>
                       <Button 
                         type="button" 
                         onClick={handleAddSlot}
-                        disabled={isAddingSlot}
+                        disabled={isAddingSlot || !!slotConflict || newSlotEnd <= newSlotStart}
                         className="w-full xl:w-auto px-4 shadow-sm shrink-0"
                       >
                         {isAddingSlot ? "Adding..." : "Add"}
                       </Button>
                     </div>
+                    {slotConflict && (
+                      <p className="text-xs text-destructive flex items-center gap-1 mt-1">
+                        <XCircle className="w-3.5 h-3.5 shrink-0" />
+                        {slotConflict}
+                      </p>
+                    )}
+                    {newSlotEnd <= newSlotStart && newSlotStart && newSlotEnd && (
+                      <p className="text-xs text-destructive flex items-center gap-1 mt-1">
+                        <XCircle className="w-3.5 h-3.5 shrink-0" />
+                        End time must be after start time
+                      </p>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1517,7 +1727,7 @@ const DoctorDashboard = () => {
                         ) : (
                           patientHistory.map((apt: any) => (
                             <tr key={apt.patient_id} className="hover:bg-muted/30 transition-colors">
-                              <td className="py-4 px-4 font-medium text-foreground">{apt.profiles?.full_name}</td>
+                              <td className="py-4 px-4 font-medium text-foreground">{apt.profiles?.full_name || apt.patient_name || "Patient"}</td>
                               <td className="py-4 px-4 text-muted-foreground">
                                 {new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                               </td>
@@ -1556,7 +1766,7 @@ const DoctorDashboard = () => {
                 </CardHeader>
                 <CardContent className="space-y-5 flex-1 flex flex-col pt-0">
                   <div className="space-y-2">
-                    <label className="block text-xs font-medium text-muted-foreground">Select Active Patient</label>
+                    <label className="block text-xs font-medium text-muted-foreground">Select Appointment</label>
                     <div className="relative">
                       <select 
                         className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background cursor-pointer appearance-none focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -1564,9 +1774,19 @@ const DoctorDashboard = () => {
                         onChange={(e) => setSelectedAppointmentId(e.target.value)}
                       >
                         <option value="">-- Select Appointment --</option>
-                        {todayAppointments.map((apt: any) => (
-                          <option key={apt.id} value={apt.id}>{apt.patient} ({apt.time})</option>
-                        ))}
+                        {[...allAppointments]
+                          .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
+                          .filter(apt => apt.status !== 'cancelled')
+                          .map((apt: any) => {
+                            const patientName = apt.profiles?.full_name || apt.patient_name || 'Patient';
+                            const aptDate = new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                            const aptTime = new Date(apt.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            return (
+                              <option key={apt.id} value={apt.id}>
+                                {patientName} — {aptDate} {aptTime}
+                              </option>
+                            );
+                          })}
                       </select>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                     </div>
@@ -1600,7 +1820,7 @@ const DoctorDashboard = () => {
               return (
               <div className="flex flex-col gap-6 lg:gap-8 animate-in fade-in duration-300">
                 <div className="flex items-center gap-4">
-                  <Button variant="outline" size="icon" onClick={() => setSelectedPatient(null)} className="h-10 w-10 shrink-0">
+                  <Button variant="outline" size="icon" onClick={() => { setSelectedPatient(null); setEditingNotes({}); }} className="h-10 w-10 shrink-0">
                     <ArrowLeft className="w-5 h-5" />
                   </Button>
                   <div>
@@ -1645,27 +1865,74 @@ const DoctorDashboard = () => {
                         {profileAppointments.length === 0 ? (
                           <div className="text-center text-muted-foreground py-8">No clinical history found</div>
                         ) : (
-                          profileAppointments.map((apt, index) => (
-                            <div key={apt.id} className={`relative pl-6 border-l-2 ${index === profileAppointments.length - 1 ? 'border-transparent pb-2' : 'border-border pb-8'}`}>
-                              <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full ${index === 0 ? 'bg-primary' : 'bg-muted-foreground'} ring-4 ring-background`}></div>
-                              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
-                                <div>
-                                  <h4 className="text-base font-semibold text-foreground">
-                                    {apt.symptoms ? 'Consultation' : 'Routine Checkup'}
-                                  </h4>
-                                  <p className="text-xs text-muted-foreground mt-0.5">
-                                    {apt.type === 'online' ? 'Online Consultation' : apt.type === 'home' ? 'Home Visit' : 'Hospital Visit'}
-                                  </p>
+                          profileAppointments.map((apt, index) => {
+                            const noteValue = editingNotes[apt.id] !== undefined
+                              ? editingNotes[apt.id]
+                              : (apt.notes || "");
+                            const isSavingThis = isSavingNoteId === apt.id;
+                            return (
+                              <div key={apt.id} className={`relative pl-6 border-l-2 ${index === profileAppointments.length - 1 ? 'border-transparent pb-2' : 'border-border pb-8'}`}>
+                                <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full ${index === 0 ? 'bg-primary' : 'bg-muted-foreground'} ring-4 ring-background`}></div>
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 mb-3">
+                                  <div>
+                                    <h4 className="text-base font-semibold text-foreground">
+                                      {apt.symptoms ? 'Consultation' : 'Routine Checkup'}
+                                    </h4>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      {apt.type === 'online' ? 'Online Consultation' : apt.type === 'home' ? 'Home Visit' : 'Hospital Visit'}
+                                    </p>
+                                  </div>
+                                  <Badge variant="outline" className="font-medium bg-background shadow-sm">
+                                    {new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </Badge>
                                 </div>
-                                <Badge variant="outline" className="font-medium bg-background shadow-sm">
-                                  {new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                </Badge>
+                                {apt.symptoms && (
+                                  <p className="text-xs text-muted-foreground mb-3 italic">
+                                    Reported symptoms: {apt.symptoms}
+                                  </p>
+                                )}
+                                {/* Medical form attached */}
+                                {apt.medical_forms && apt.medical_forms.length > 0 && (
+                                  <div className="mb-3 flex flex-wrap gap-2">
+                                    {apt.medical_forms.map((form: any) => {
+                                      const label = form.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' :
+                                        form.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' :
+                                        form.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' :
+                                        'Medical Questionnaire';
+                                      return (
+                                        <button
+                                          key={form.id}
+                                          onClick={() => setViewingForm(form)}
+                                          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                                        >
+                                          <ClipboardList className="w-3.5 h-3.5" />
+                                          View {label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                <div className="space-y-2">
+                                  <label className="block text-xs font-medium text-muted-foreground">Clinical Notes</label>
+                                  <textarea
+                                    className="flex min-h-[100px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none leading-relaxed"
+                                    placeholder="Enter diagnosis, treatment plan, or observations..."
+                                    value={noteValue}
+                                    onChange={(e) => setEditingNotes(prev => ({ ...prev, [apt.id]: e.target.value }))}
+                                  />
+                                  <Button
+                                    size="sm"
+                                    className="gap-2"
+                                    disabled={isSavingThis}
+                                    onClick={() => handleSaveAppointmentNote(apt.id)}
+                                  >
+                                    <FilePlus className="w-4 h-4" />
+                                    {isSavingThis ? "Saving..." : "Save Notes"}
+                                  </Button>
+                                </div>
                               </div>
-                              <div className="bg-muted/30 rounded-xl p-4 sm:p-5 border border-border text-sm text-foreground/80 leading-relaxed">
-                                {apt.notes || (apt.symptoms ? `Symptoms reported: ${apt.symptoms}` : "No comprehensive clinical notes recorded for this visit.")}
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </Card>
@@ -1678,7 +1945,50 @@ const DoctorDashboard = () => {
         )}
       </div>
     </div>
+
+    {/* Questionnaire Viewer Dialog */}
+    <Dialog open={!!viewingForm} onOpenChange={(open) => { if (!open) setViewingForm(null); }}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-primary" />
+            {viewingForm?.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' :
+             viewingForm?.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' :
+             viewingForm?.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' :
+             'Medical Questionnaire'}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Submitted {viewingForm?.created_at ? new Date(viewingForm.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}
+            {' · '}
+            Status: <span className="capitalize font-medium">{viewingForm?.status || 'submitted'}</span>
+          </p>
+        </DialogHeader>
+        <ScrollArea className="flex-1 -mx-6 px-6">
+          {viewingForm?.data && Object.keys(viewingForm.data).length > 0 ? (
+            <div className="space-y-1 pb-4">
+              {Object.entries(viewingForm.data as Record<string, any>).map(([key, value]) => {
+                if (!value && value !== 0) return null;
+                // Convert snake_case key to readable label
+                const label = key
+                  .replace(/_/g, ' ')
+                  .replace(/\b\w/g, (c) => c.toUpperCase());
+                return (
+                  <div key={key} className="flex gap-4 py-2.5 border-b border-border/40 last:border-0">
+                    <span className="text-xs font-medium text-muted-foreground w-48 shrink-0 leading-relaxed">{label}</span>
+                    <span className="text-sm text-foreground leading-relaxed capitalize">{String(value)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground text-sm">No responses recorded in this questionnaire.</div>
+          )}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 
 export default DoctorDashboard;
+

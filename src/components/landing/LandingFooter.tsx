@@ -15,13 +15,13 @@ export function LandingFooter() {
                             age—delivered with comfort, precision, and trust.
                         </p>
                         <div className="flex items-center gap-3 mt-2">
-                            <a href="#" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">
+                            <a href="https://www.instagram.com/st.gamalielshospital/" target="_blank" rel="noopener noreferrer" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">
                                 <Instagram className="w-4 h-4 stroke-[1.5px]" />
                             </a>
-                            <a href="#" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">
+                            <a href="https://x.com/st_gamaliels" target="_blank" rel="noopener noreferrer" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">
                                 <Twitter className="w-4 h-4 stroke-[1.5px]" />
                             </a>
-                            <a href="#" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">
+                            <a href="https://web.facebook.com/profile.php?id=100094774093355" target="_blank" rel="noopener noreferrer" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">
                                 <Facebook className="w-4 h-4 stroke-[1.5px]" />
                             </a>
                         </div>

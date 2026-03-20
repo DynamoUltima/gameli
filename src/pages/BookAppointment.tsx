@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { sendEmail } from "@/lib/emailService";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useDoctorSchedules } from "@/hooks/useDoctorSchedules";
@@ -91,7 +92,7 @@ const BookAppointment = () => {
   const doctorsForClinic = useMemo(() => {
     if (!formData.clinic) return [];
     return doctors
-      .filter(doc => doc.specialties?.some(s => s.id === formData.clinic) && doc.available)
+      .filter(doc => (doc.specialty_id === formData.clinic || doc.specialties?.some(s => s.id === formData.clinic)) && doc.available)
       .map(doc => ({
         id: doc.user_id,
         full_name: doc.profiles?.full_name || "Unknown Doctor"
@@ -295,6 +296,32 @@ const BookAppointment = () => {
         .maybeSingle();
 
       if (apptErr) throw apptErr;
+
+      // Send appointment confirmation email to patient
+      const selectedDoc = doctors.find(d => d.user_id === formData.doctor);
+      const dateStr = selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '';
+      const timeStr = selectedTime ? format(new Date(selectedTime), 'h:mm a') : '';
+      sendEmail('appointment_confirmation', {
+        patientEmail: formData.email,
+        patientName: formData.name,
+        doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
+        specialty: specialties.find(s => s.id === formData.clinic)?.name || '',
+        date: dateStr,
+        time: timeStr,
+        type: type,
+      });
+
+      // Send notification email to the doctor
+      if (selectedDoc?.profiles?.email) {
+        sendEmail('doctor_booking_notification', {
+          doctorEmail: selectedDoc.profiles.email,
+          doctorName: selectedDoc.profiles.full_name,
+          patientName: formData.name,
+          date: dateStr,
+          time: timeStr,
+          type: type,
+        });
+      }
       
       const clinicName = specialties.find(s => s.id === formData.clinic)?.name || '';
       if (clinicName.toLowerCase().includes('fertility')) {
@@ -316,8 +343,11 @@ const BookAppointment = () => {
         }
 
         if (formData.bookAsCouple && formData.partnerEmail) {
-          // Mock sending an email to the partner
-          console.log(`Sending ${partnerFormType} form to partner email: ${formData.partnerEmail}`);
+          sendEmail('partner_fertility_form', {
+            partnerEmail: formData.partnerEmail,
+            formType: partnerFormType,
+            date: selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '',
+          });
           toast.success(`A secure link to the partner's form has been sent to ${formData.partnerEmail}`);
         }
       }

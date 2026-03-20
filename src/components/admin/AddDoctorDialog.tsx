@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { sendEmail } from '@/lib/emailService';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -85,34 +86,82 @@ export const AddDoctorDialog = ({
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setLoading(true);
     try {
-      // Create the user account
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: values.email,
-        password: values.password,
-        options: {
-          data: {
+      // Check if user already exists in profiles (e.g. previously deleted doctor)
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', values.email)
+        .maybeSingle();
+
+      let userId = existingProfile?.id;
+
+      if (!userId) {
+        // Save admin session to restore after signup
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+        // Create the user account via standard signup
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: values.email,
+          password: values.password,
+          options: {
+            data: {
+              first_name: values.first_name,
+              last_name: values.last_name,
+              other_name: values.other_name || '',
+              phone: values.phone,
+              gender: values.gender || null,
+            },
+          },
+        });
+
+        if (authError) throw authError;
+        if (!authData.user) throw new Error('Failed to create user');
+        
+        userId = authData.user.id;
+
+        // Restore admin session immediately so RLS policies pass for subsequent inserts
+        if (currentSession) {
+          await supabase.auth.setSession({
+            access_token: currentSession.access_token,
+            refresh_token: currentSession.refresh_token,
+          });
+        }
+      } else {
+        // We found an existing user, update their profile with the new details
+        const { error: profileUpdateError } = await supabase
+          .from('profiles')
+          .update({
             first_name: values.first_name,
             last_name: values.last_name,
-            other_name: values.other_name || '',
+            other_name: values.other_name || null,
             phone: values.phone,
             gender: values.gender || null,
-          },
-        },
-      });
+            full_name: `${values.first_name} ${values.last_name}`.trim(),
+          })
+          .eq('id', userId);
+        
+        if (profileUpdateError) throw profileUpdateError;
+      }
 
-
-      console.log({ 'authdata': authData })
-
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('Failed to create user');
-
-      // Update user role to doctor
-      const { error: roleError } = await supabase
+      // First try to check if user_roles exists, if not insert, else update
+      const { data: existingRole } = await supabase
         .from('user_roles')
-        .update({ role: 'doctor' })
-        .eq('user_id', authData.user.id);
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (roleError) throw roleError;
+      if (existingRole) {
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .update({ role: 'doctor' })
+          .eq('user_id', userId);
+        if (roleError) throw roleError;
+      } else {
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .insert({ user_id: userId, role: 'doctor' });
+        if (roleError) throw roleError;
+      }
 
       // Ensure specialty exists in DB.
       let resolvedSpecialtyIds: string[] = [];
@@ -144,10 +193,12 @@ export const AddDoctorDialog = ({
 
       // Create doctor record
       const { data: doctorData, error: doctorError } = await supabase.from('doctors').insert({
-        user_id: authData.user.id,
+        user_id: userId,
         years_of_experience: 0,
         available: true,
       }).select('id').single();
+
+
 
       if (doctorError) {
         if (
@@ -186,9 +237,21 @@ export const AddDoctorDialog = ({
         description: 'Doctor added successfully',
       });
 
+      // Send welcome email to the new doctor
+      sendEmail('doctor_welcome', {
+        email: values.email,
+        name: `${values.first_name} ${values.last_name}`,
+        tempPassword: values.password,
+        loginUrl: `${window.location.origin}/auth`,
+      });
+
       form.reset();
       onOpenChange(false);
-      onSuccess();
+      
+      // Delay fetch to allow Supabase trigger to create the profile
+      setTimeout(() => {
+        onSuccess();
+      }, 1500);
     } catch (error: any) {
       console.log({ 'error': error })
       toast({

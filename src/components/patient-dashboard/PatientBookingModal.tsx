@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { sendEmail } from "@/lib/emailService";
 import {
     X,
     CheckCircle,
@@ -60,8 +61,10 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
 
     const selectedSpecialty = specialties.find(s => s.id === clinic);
     const amountToPay = selectedSpecialty?.cost || (bookingType === 'hospital' ? 144 : bookingType === 'online' ? 45 : 0);
+    const filteredDoctors = doctors.filter(doc => 
+        (doc.specialty_id === clinic || doc.specialties?.some(s => s.id === clinic)) && doc.available
+    );
     const isFertility = selectedSpecialty?.name?.toLowerCase().includes('fertility');
-    const filteredDoctors = doctors.filter(doc => doc.specialties?.some(s => s.id === clinic) && doc.available);
 
     useEffect(() => {
         const fetchAvailability = async () => {
@@ -173,6 +176,43 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                         .maybeSingle();
                         
                     if (apptErr) throw apptErr;
+
+                    // Send appointment confirmation email to patient
+                    const selectedDoc = doctors.find(d => d.user_id === preferredDoctor);
+                    const dateStr = selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '';
+                    sendEmail('appointment_confirmation', {
+                        patientEmail: patientEmail,
+                        patientName: patientName,
+                        doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
+                        specialty: selectedSpecialty?.name || '',
+                        date: dateStr,
+                        time: selectedTime,
+                        type: bookingType,
+                    });
+
+                    // Send payment receipt
+                    sendEmail('payment_receipt', {
+                        patientEmail: patientEmail,
+                        patientName: patientName,
+                        amount: bookingType === "online" ? "150.00" : "200.00",
+                        type: bookingType,
+                        doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
+                        specialty: selectedSpecialty?.name || '',
+                        date: dateStr,
+                        time: selectedTime,
+                    });
+
+                    // Send notification email to the doctor
+                    if (selectedDoc?.profiles?.email) {
+                        sendEmail('doctor_booking_notification', {
+                            doctorEmail: selectedDoc.profiles.email,
+                            doctorName: selectedDoc.profiles.full_name,
+                            patientName: patientName,
+                            date: dateStr,
+                            time: selectedTime,
+                            type: bookingType,
+                        });
+                    }
                     
                     if (isFertility && appt) {
                         const formType = consultationFor === 'couple' ? 
@@ -194,7 +234,11 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                         }
 
                         if (consultationFor === 'couple' && partnerEmail) {
-                            console.log(`Sending ${partnerFormType} form to partner email: ${partnerEmail}`);
+                            sendEmail('partner_fertility_form', {
+                                partnerEmail,
+                                formType: partnerFormType,
+                                date: dateStr,
+                            });
                             toast({
                                 title: "Email Sent",
                                 description: `A secure link to the partner's form has been sent to ${partnerEmail}`,

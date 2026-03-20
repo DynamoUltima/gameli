@@ -1,4 +1,5 @@
-import { Bell, HeartPulse, Settings } from "lucide-react";
+import { Bell, HeartPulse, Settings, LogOut } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,6 +10,8 @@ import { Notification } from "@/pages/PatientDashboard";
 interface PatientNavProps {
     fullName: string;
     initials: string;
+    email: string;
+    onSignOut: () => void;
     unreadCount: number;
     notifications: Notification[];
     onMarkAllRead: () => void;
@@ -20,6 +23,8 @@ interface PatientNavProps {
 export const PatientNav = ({
     fullName,
     initials,
+    email,
+    onSignOut,
     unreadCount,
     notifications,
     onMarkAllRead,
@@ -41,18 +46,18 @@ export const PatientNav = ({
                     </div>
 
                     <div className="hidden md:flex items-center gap-4 text-sm font-medium text-slate-500 dark:text-slate-400">
-                        <button
+                        {/* <button
                             onClick={() => window.location.href = '/'}
                             className="hover:text-slate-900 dark:hover:text-white transition-colors"
                         >
                             Landing Page
-                        </button>
-                        <button
+                        </button> */}
+                        {/* <button
                             onClick={() => window.location.href = '/dashboard/admin'}
                             className="hover:text-slate-900 dark:hover:text-white transition-colors"
                         >
                             Admin Dashboard
-                        </button>
+                        </button> */}
                     </div>
                 </div>
 
@@ -146,9 +151,26 @@ export const PatientNav = ({
                         <Settings className="w-5 h-5" strokeWidth={1.5} />
                     </button>
 
-                    <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center text-sm font-medium ml-2 shadow-sm cursor-pointer hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors border-2 border-slate-100 dark:border-slate-800">
-                        {initials || "PT"}
-                    </div>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <div className="w-10 h-10 rounded-full bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center text-sm font-medium ml-2 shadow-sm cursor-pointer hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors border-2 border-slate-100 dark:border-slate-800">
+                                {initials || "PT"}
+                            </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56 mt-1">
+                            <DropdownMenuLabel className="font-normal">
+                                <div className="flex flex-col space-y-1">
+                                    <p className="text-sm font-medium leading-none">{fullName || "Patient"}</p>
+                                    <p className="text-xs leading-none text-slate-500">{email}</p>
+                                </div>
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={onSignOut} className="text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950/50 cursor-pointer">
+                                <LogOut className="mr-2 h-4 w-4" />
+                                <span>Sign out</span>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
             </div>
         </nav>

@@ -8,6 +8,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ArrowLeft, CreditCard, Smartphone, Lock, Check } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { supabase } from "@/integrations/supabase/client";
+import { sendEmail } from "@/lib/emailService";
+import { format } from "date-fns";
 
 const Payment = () => {
   const navigate = useNavigate();
@@ -28,15 +31,59 @@ const Payment = () => {
     cvv: ""
   });
 
-  const handlePayment = () => {
+  const handlePayment = async () => {
     setProcessing(true);
 
-    // Simulate payment processing
-    setTimeout(() => {
-      setProcessing(false);
+    try {
+      const appointmentId = searchParams.get("appointmentId");
+      if (appointmentId) {
+        // Update to paid
+        const { error: updateErr } = await supabase
+          .from('appointments' as any)
+          .update({ payment_status: 'paid' })
+          .eq('id', appointmentId);
+        
+        if (updateErr) throw updateErr;
+
+        // Fetch details for email
+        const { data: appt } = await supabase
+          .from('appointments' as any)
+          .select('*')
+          .eq('id', appointmentId)
+          .maybeSingle();
+
+        if (appt && appt.patient_id) {
+            const { data: patientData } = await supabase.from('profiles').select('*').eq('id', appt.patient_id).maybeSingle();
+            let doctorName = 'Your Doctor';
+            if (appt.doctor_id) {
+               const { data: docProfile } = await supabase.from('profiles').select('*').eq('id', appt.doctor_id).maybeSingle();
+               if (docProfile) doctorName = docProfile.full_name;
+            }
+            
+            if (patientData && patientData.email) {
+              const dateObj = new Date(appt.scheduled_at);
+              sendEmail('payment_receipt', {
+                patientEmail: patientData.email,
+                patientName: patientData.full_name || 'Patient',
+                doctorName: doctorName,
+                specialty: appt.clinic || 'General',
+                date: format(dateObj, 'MMMM do, yyyy'),
+                time: format(dateObj, 'h:mm a'),
+                amount: amount,
+                type: appointmentLabels[appointmentType]?.name || "Consultation"
+              });
+            }
+        }
+      }
+
       toast.success("Payment successful!");
-      navigate("/payment-success");
-    }, 2000);
+      navigate(`/payment-success?appointmentId=${appointmentId || ''}`);
+    } catch (error) {
+       console.error("Payment processing error:", error);
+       toast.error("Failed to process payment");
+    } finally {
+       setProcessing(false);
+    }
   };
 
   const appointmentType = searchParams.get("type") || "online";

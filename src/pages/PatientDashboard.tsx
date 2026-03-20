@@ -137,8 +137,8 @@ const PatientDashboard = () => {
         return (isPendingOrConfirmed || isFromToday) && apt.status !== 'cancelled' && apt.status !== 'completed';
       });
 
-      // Sort upcoming in ascending order (closest first)
-      upcoming.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+      // Sort upcoming in descending order (most recently booked first)
+      upcoming.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       const past = (appointmentsData || []).filter(apt => {
         const isPendingOrConfirmed = apt.status === 'pending' || apt.status === 'confirmed';
@@ -152,13 +152,13 @@ const PatientDashboard = () => {
             .from('profiles')
             .select('full_name')
             .eq('id', apt.doctor_id)
-            .single();
+            .maybeSingle();
 
           const { data: specialty } = await supabase
             .from('specialties')
             .select('name')
             .eq('id', apt.specialty_id)
-            .single();
+            .maybeSingle();
 
           return {
             ...apt,
@@ -174,13 +174,13 @@ const PatientDashboard = () => {
             .from('profiles')
             .select('full_name')
             .eq('id', apt.doctor_id)
-            .single();
+            .maybeSingle();
 
           const { data: specialty } = await supabase
             .from('specialties')
             .select('name')
             .eq('id', apt.specialty_id)
-            .single();
+            .maybeSingle();
 
           return {
             ...apt,
@@ -224,7 +224,7 @@ const PatientDashboard = () => {
             .from('profiles')
             .select('full_name')
             .eq('id', apt.doctor_id)
-            .single();
+            .maybeSingle();
 
           const doctorName = doctorProfile?.full_name || 'Doctor';
           const date = formatDate(apt.scheduled_at);
@@ -471,6 +471,8 @@ const PatientDashboard = () => {
       <PatientNav
         fullName={fullName}
         initials={initials}
+        email={user?.email || ""}
+        onSignOut={signOut}
         unreadCount={unreadCount}
         notifications={notifications}
         onMarkAllRead={() => setUnreadCount(0)}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { sendEmail } from "@/lib/emailService";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -229,6 +230,13 @@ const Auth = () => {
       }
 
       toast.success("Registration successful! Please check your email to confirm your account.");
+
+      // Send welcome email to the new patient
+      sendEmail('patient_welcome', {
+        email: registerData.email,
+        name: `${registerData.firstName} ${registerData.lastName}`,
+        loginUrl: `${window.location.origin}/auth`,
+      });
     } catch (error: any) {
       console.error("Registration error:", error);
       toast.error(error.message || "Failed to register. Please try again.");

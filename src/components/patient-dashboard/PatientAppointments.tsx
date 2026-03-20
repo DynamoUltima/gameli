@@ -156,7 +156,11 @@ export const PatientAppointments = ({
                                       </div>
                                       {(apt.status === "pending" || apt.status === "confirmed") && apt.type === "online" && (
                                           <Button 
-                                            className="w-full mt-5 rounded-xl border-slate-200 dark:border-slate-800 font-medium h-11 shadow-sm text-slate-900 dark:text-white dark:bg-slate-900 dark:hover:bg-slate-800" 
+                                            className={`w-full mt-5 rounded-xl font-medium h-11 shadow-sm ${
+                                              apt.meet_link
+                                                ? "border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white dark:bg-slate-900 dark:hover:bg-slate-800"
+                                                : "bg-slate-100 text-slate-500 disabled:opacity-100 border-none dark:bg-slate-800/80 dark:text-slate-400"
+                                            }`} 
                                             variant={apt.meet_link ? "default" : "outline"}
                                             onClick={() => apt.meet_link ? window.open(apt.meet_link, '_blank') : null}
                                             disabled={!apt.meet_link}

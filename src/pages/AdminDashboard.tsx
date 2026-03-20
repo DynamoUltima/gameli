@@ -1317,7 +1317,7 @@ const AdminDashboard = () => {
       const specialtiesWithDoctorCounts = await Promise.all(
         specialties.map(async (specialty) => {
           const doctorCount = doctorsData.filter(
-            d => d.specialty_id === specialty.id
+            d => d.specialty_id === specialty.id || d.specialties?.some((s: any) => s.id === specialty.id)
           ).length;
 
           return {

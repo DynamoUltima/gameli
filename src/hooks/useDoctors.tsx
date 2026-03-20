@@ -20,6 +20,8 @@ export interface Doctor {
   updated_at: string;
   profiles?: {
     full_name: string;
+    first_name?: string;
+    last_name?: string;
     email: string;
     phone: string;
   };
@@ -46,9 +48,11 @@ export const useDoctors = () => {
         (doctorsData || []).map(async (doctor) => {
           const { data: profileData } = await supabase
             .from('profiles')
-            .select('full_name, email, phone')
+            .select('full_name, first_name, last_name, email, phone')
             .eq('id', doctor.user_id)
             .maybeSingle();
+
+          const calculatedFullName = profileData?.full_name || [profileData?.first_name, profileData?.last_name].filter(Boolean).join(' ') || 'N/A';
 
           const { data: doctorSpecialtiesData } = await supabase
             .from('doctor_specialties')
@@ -61,7 +65,10 @@ export const useDoctors = () => {
 
           return {
             ...doctor,
-            profiles: profileData,
+            profiles: {
+              ...profileData,
+              full_name: calculatedFullName
+            },
             specialties: specialtyData,
           };
         })

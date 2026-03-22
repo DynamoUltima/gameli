@@ -1,6 +1,7 @@
 import { Sparkles, ChevronDown, Stethoscope, HeartPulse, AlertCircle, ArrowRight, UserCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Props {
   onBookClick: (title: string, img: string) => void;
@@ -12,6 +13,7 @@ interface Props {
 
 export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, toggleServicesMenu, activeCampaign }: Props) {
   const [currentSlide, setCurrentSlide] = useState(0);
+  const { user } = useAuth();
 
   const slides = [
     {
@@ -83,7 +85,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
                     Our Services
                   </h4>
                   <div className="flex flex-col gap-1">
-                    <button
+                     <button
                       onClick={(e) => {
                         onBookClick('Online Consultation', 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=800');
                         toggleServicesMenu(e);
@@ -174,13 +176,13 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
           <div className="flex items-center gap-3 sm:gap-4">
             <Link to="/auth" className="flex items-center gap-2 text-white/90 hover:text-white transition-colors text-sm font-medium bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-full border border-white/20 hover:bg-white/20">
               <UserCircle2 className="w-5 h-5 stroke-[1.5px]" />
-              <span className="hidden sm:inline">Portal</span>
+              <span className="hidden sm:inline">{user ? "Portal" : "Login / Register"}</span>
             </Link>
             <button
               className="flex items-center gap-3 pl-6 pr-2 py-2 bg-white text-slate-900 rounded-full font-medium text-sm hover:bg-slate-50 hover:scale-105 transition-all shadow-lg shadow-black/10"
               onClick={() => onBookClick('General Consultation', 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&q=80&w=800')}
             >
-              BOOK A CALL
+              BOOK A CONSULTATION
               <div className="bg-slate-100 p-2 rounded-full flex items-center justify-center">
                 <ArrowRight className="w-4 h-4 stroke-[1.5px]" />
               </div>

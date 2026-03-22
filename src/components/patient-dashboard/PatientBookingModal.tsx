@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { sendEmail } from "@/lib/emailService";
+import { sendSms } from "@/lib/smsService";
 import {
     X,
     CheckCircle,
@@ -180,38 +181,36 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                     // Send appointment confirmation email to patient
                     const selectedDoc = doctors.find(d => d.user_id === preferredDoctor);
                     const dateStr = selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '';
-                    sendEmail('appointment_confirmation', {
+                    
+                    const notificationData = {
                         patientEmail: patientEmail,
+                        patientPhone: patientPhone,
                         patientName: patientName,
                         doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
                         specialty: selectedSpecialty?.name || '',
                         date: dateStr,
                         time: selectedTime,
                         type: bookingType,
-                    });
+                        amount: bookingType === "online" ? "150.00" : "200.00",
+                    };
+
+                    sendEmail('appointment_confirmation', notificationData);
+                    sendSms('appointment_confirmation', notificationData);
 
                     // Send payment receipt
-                    sendEmail('payment_receipt', {
-                        patientEmail: patientEmail,
-                        patientName: patientName,
-                        amount: bookingType === "online" ? "150.00" : "200.00",
-                        type: bookingType,
-                        doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
-                        specialty: selectedSpecialty?.name || '',
-                        date: dateStr,
-                        time: selectedTime,
-                    });
+                    sendEmail('payment_receipt', notificationData);
+                    sendSms('payment_receipt', notificationData);
 
                     // Send notification email to the doctor
                     if (selectedDoc?.profiles?.email) {
-                        sendEmail('doctor_booking_notification', {
+                        const doctorNotification = {
                             doctorEmail: selectedDoc.profiles.email,
+                            doctorPhone: selectedDoc.profiles.phone || '', // Assuming phone exists or is empty
                             doctorName: selectedDoc.profiles.full_name,
-                            patientName: patientName,
-                            date: dateStr,
-                            time: selectedTime,
-                            type: bookingType,
-                        });
+                            ...notificationData
+                        };
+                        sendEmail('doctor_booking_notification', doctorNotification);
+                        sendSms('doctor_booking_notification', doctorNotification);
                     }
                     
                     if (isFertility && appt) {

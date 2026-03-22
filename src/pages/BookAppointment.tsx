@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { sendEmail } from "@/lib/emailService";
+import { sendSms } from "@/lib/smsService";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useDoctorSchedules } from "@/hooks/useDoctorSchedules";
@@ -301,26 +302,32 @@ const BookAppointment = () => {
       const selectedDoc = doctors.find(d => d.user_id === formData.doctor);
       const dateStr = selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '';
       const timeStr = selectedTime ? format(new Date(selectedTime), 'h:mm a') : '';
-      sendEmail('appointment_confirmation', {
+      
+      const notificationData = {
         patientEmail: formData.email,
+        patientPhone: formData.phone,
         patientName: formData.name,
         doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
         specialty: specialties.find(s => s.id === formData.clinic)?.name || '',
         date: dateStr,
         time: timeStr,
         type: type,
-      });
+        amount: type === "online" ? "150.00" : "200.00",
+      };
+
+      sendEmail('appointment_confirmation', notificationData);
+      sendSms('appointment_confirmation', notificationData);
 
       // Send notification email to the doctor
       if (selectedDoc?.profiles?.email) {
-        sendEmail('doctor_booking_notification', {
+        const doctorNotification = {
           doctorEmail: selectedDoc.profiles.email,
+          doctorPhone: selectedDoc.profiles.phone || '',
           doctorName: selectedDoc.profiles.full_name,
-          patientName: formData.name,
-          date: dateStr,
-          time: timeStr,
-          type: type,
-        });
+          ...notificationData
+        };
+        sendEmail('doctor_booking_notification', doctorNotification);
+        sendSms('doctor_booking_notification', doctorNotification);
       }
       
       const clinicName = specialties.find(s => s.id === formData.clinic)?.name || '';

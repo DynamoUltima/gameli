@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface Props {
@@ -5,6 +6,19 @@ interface Props {
 }
 
 export function LandingServices({ onBookClick }: Props) {
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+    const scroll = (direction: 'left' | 'right') => {
+        if (scrollContainerRef.current) {
+            const scrollAmount = 340 + 20; // card width + gap
+            if (direction === 'left') {
+                scrollContainerRef.current.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+            } else {
+                scrollContainerRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+            }
+        }
+    };
+
     return (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 lg:gap-8">
@@ -45,10 +59,10 @@ export function LandingServices({ onBookClick }: Props) {
 
                         {/* Navigation Controls */}
                         <div className="flex gap-3">
-                            <button className="w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors">
+                            <button onClick={() => scroll('left')} className="w-12 h-12 rounded-full border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors">
                                 <ArrowLeft className="w-5 h-5 stroke-[1.5px]" />
                             </button>
-                            <button className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center text-white hover:bg-slate-800 transition-colors shadow-md">
+                            <button onClick={() => scroll('right')} className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center text-white hover:bg-slate-800 transition-colors shadow-md">
                                 <ArrowRight className="w-5 h-5 stroke-[1.5px]" />
                             </button>
                         </div>
@@ -64,7 +78,7 @@ export function LandingServices({ onBookClick }: Props) {
                     </p>
 
                     {/* Cards Carousel */}
-                    <div className="flex gap-5 overflow-x-auto pb-6 snap-x hide-scrollbar scroll-smooth">
+                    <div ref={scrollContainerRef} className="flex gap-5 overflow-x-auto pb-6 snap-x hide-scrollbar scroll-smooth">
                         {/* Service Card 1 */}
                         <div
                             className="relative min-w-[280px] sm:min-w-[340px] h-[340px] rounded-[2rem] overflow-hidden group snap-center cursor-pointer"

@@ -211,7 +211,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
               General Checkups
             </span>
             <a href="#" className="px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-md text-white text-base font-normal border border-white/20 hover:bg-white/20 transition-colors">
-              Emergency Care
+              Dietetics
             </a>
             <a href="#" className="px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-md text-white text-base font-normal border border-white/20 hover:bg-white/20 transition-colors">
               Surgery

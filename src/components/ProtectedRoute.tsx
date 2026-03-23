@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 
 export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
   const { user, loading: authLoading } = useAuth(true);
-  const { role, loading: roleLoading } = useUserRole(user?.id);
+  const { role, loading: roleLoading } = useUserRole(user?.uid);
   const navigate = useNavigate();
 
   useEffect(() => {

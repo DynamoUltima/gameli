@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { sendEmail } from "@/lib/emailService";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { auth, db } from "@/integrations/firebase/client";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updatePassword, onAuthStateChanged } from "firebase/auth";
+import { doc, setDoc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,36 +45,24 @@ const Auth = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
 
-  useEffect(() => {
-    const testConnection = async () => {
-      const { data, error } = await supabase.from('profiles').select('count').limit(1);
-      console.log('Supabase connection test:', error ? 'Failed' : 'Success');
-      console.log('Connected to:', supabase);
-    };
-    testConnection();
-  }, []);
+  // Firebase handles connection automatically
 
   // Check if user is coming from password reset email
   useEffect(() => {
-    const checkPasswordReset = async () => {
-      const resetParam = searchParams.get('reset');
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && resetParam === 'true') {
-        setIsResettingPassword(true);
-      }
-    };
-    checkPasswordReset();
+    const resetParam = searchParams.get('reset');
+    if (resetParam === 'true') {
+      setIsResettingPassword(true);
+    }
   }, [searchParams]);
 
-  // Check if user is already logged in and redirect based on role
+  // Check if user is already logged in
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setCurrentUserId(session.user.id);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUserId(user.uid);
       }
-    };
-    checkAuth();
+    });
+    return () => unsubscribe();
   }, []);
 
   // Handle redirect after role is loaded
@@ -173,15 +163,13 @@ const Auth = () => {
     }
 
     if (registerData.hospitalCardId.trim()) {
-      const { data: existingCard, error: cardError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('hospital_card_id', registerData.hospitalCardId.trim())
-        .maybeSingle();
-
-      if (cardError) {
-        console.error('Error checking hospital card ID:', cardError);
-      } else if (existingCard) {
+      const q = query(
+        collection(db, 'users'), 
+        where('hospital_card_id', '==', registerData.hospitalCardId.trim())
+      );
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
         toast.error("This hospital card ID is already registered. Please contact the hospital if you believe this is an error.");
         return;
       }
@@ -190,44 +178,28 @@ const Auth = () => {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const userCredential = await createUserWithEmailAndPassword(
+        auth, 
+        registerData.email, 
+        registerData.password
+      );
+      
+      const user = userCredential.user;
+
+      await setDoc(doc(db, 'users', user.uid), {
+        id: user.uid,
         email: registerData.email,
-        password: registerData.password,
-        options: {
-          emailRedirectTo: `${window.location.origin}${redirectTo}`,
-          data: {
-            first_name: registerData.firstName,
-            last_name: registerData.lastName,
-            other_name: registerData.otherName,
-            phone: registerData.phone,
-            date_of_birth: registerData.dateOfBirth || null,
-            hospital_card_id: registerData.hospitalCardId.trim() || null,
-            gender: registerData.gender || null,
-            role: registerData.role,
-          }
-        }
+        first_name: registerData.firstName,
+        last_name: registerData.lastName,
+        other_name: registerData.otherName,
+        phone: registerData.phone,
+        date_of_birth: registerData.dateOfBirth || null,
+        hospital_card_id: registerData.hospitalCardId.trim() || null,
+        gender: registerData.gender || null,
+        role: registerData.role,
+        status: 'active',
+        created_at: new Date().toISOString()
       });
-
-      if (error) throw error;
-
-      if (!data.user?.id) {
-        throw new Error("User creation failed");
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({
-          user_id: data.user.id,
-          role: registerData.role
-        });
-
-      if (roleError) {
-        console.error("Error setting user role:", roleError);
-        toast.error("Account created but role setting failed. Please contact support.");
-        return;
-      }
 
       toast.success("Registration successful! Please check your email to confirm your account.");
 
@@ -255,11 +227,9 @@ const Auth = () => {
 
     setResetLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: `${window.location.origin}/auth?reset=true`,
+      await sendPasswordResetEmail(auth, resetEmail, {
+        url: `${window.location.origin}/auth?reset=true`,
       });
-
-      if (error) throw error;
 
       toast.success("Password reset email sent! Check your inbox.");
       setShowResetPassword(false);
@@ -292,15 +262,12 @@ const Auth = () => {
 
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword
-      });
-
-      if (error) throw error;
+      if (!auth.currentUser) throw new Error("No user is currently logged in.");
+      await updatePassword(auth.currentUser, newPassword);
 
       toast.success("Password updated successfully! You can now login with your new password.");
 
-      await supabase.auth.signOut();
+      await auth.signOut();
       setIsResettingPassword(false);
       setNewPassword("");
       setConfirmNewPassword("");
@@ -324,18 +291,15 @@ const Auth = () => {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginData.phone,
-        password: loginData.password,
-      });
+      const userCredential = await signInWithEmailAndPassword(
+        auth, 
+        loginData.phone, 
+        loginData.password
+      );
 
-      if (error) throw error;
-
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', data.user.id)
-        .maybeSingle();
+      const userDocRef = doc(db, 'users', userCredential.user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      const role = userDocSnap.exists() ? userDocSnap.data().role : 'patient';
 
       toast.success("Login successful! Redirecting...");
 
@@ -343,7 +307,6 @@ const Auth = () => {
         if (redirectTo && redirectTo !== "/" && redirectTo.includes("/book/")) {
           navigate(redirectTo);
         } else {
-          const role = roleData?.role;
           switch (role) {
             case 'doctor':
               navigate('/dashboard/doctor');

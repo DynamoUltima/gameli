@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/integrations/firebase/client';
 
 export type UserRole = 'patient' | 'doctor' | 'admin' | null;
 
@@ -16,17 +17,16 @@ export const useUserRole = (userId?: string) => {
 
     const fetchRole = async () => {
       try {
-        const { data, error } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        if (error) throw error;
-        setRole(data?.role as UserRole || 'patient');
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setRole((data.role as UserRole) || 'patient');
+        } else {
+          setRole('patient');
+        }
       } catch (error) {
         console.error('Error fetching user role:', error);
-        setRole('patient'); // Default to patient role
+        setRole('patient');
       } finally {
         setLoading(false);
       }

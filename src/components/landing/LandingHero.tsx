@@ -17,7 +17,7 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
 
   const slides = [
     {
-      title: "Modern\nHealthcare With\nGentle Care.",
+      title: "Modern\nHealthcare With\nGentle Care",
       subtitle: "Expert medical care for healthy, confident lives at every age—delivered with comfort, precision, and trust.",
       image: "/uploaded-banner.jpg"
     }

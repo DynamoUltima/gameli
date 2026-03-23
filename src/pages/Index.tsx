@@ -27,13 +27,32 @@ export default function Index() {
         const { data, error } = await supabase
           .from('awareness_campaigns')
           .select('*')
-          .eq('status', 'scheduled')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .eq('status', 'active')
+          .order('created_at', { ascending: false });
 
         if (data && !error) {
-          setActiveCampaign(data);
+          let validCampaign = null;
+          const today = new Date();
+          // Reset time to start of day for accurate day-to-day comparison
+          today.setHours(0, 0, 0, 0);
+
+          for (const campaign of data) {
+            const startDate = new Date(campaign.scheduled_date);
+            startDate.setHours(0, 0, 0, 0);
+            const endDate = new Date(startDate);
+
+            if (campaign.duration_unit === 'days') endDate.setDate(endDate.getDate() + campaign.duration);
+            if (campaign.duration_unit === 'weeks') endDate.setDate(endDate.getDate() + campaign.duration * 7);
+            if (campaign.duration_unit === 'months') endDate.setMonth(endDate.getMonth() + campaign.duration);
+            
+            if (today >= startDate && today <= endDate) {
+              validCampaign = campaign;
+              break;
+            }
+          }
+          setActiveCampaign(validCampaign);
+        } else {
+          setActiveCampaign(null);
         }
       } catch (err) {
         console.error("Error fetching campaign:", err);

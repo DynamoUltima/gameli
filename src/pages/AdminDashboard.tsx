@@ -79,7 +79,10 @@ const AdminDashboard = () => {
   const [editCampaignData, setEditCampaignData] = useState({
     title: "",
     subtitle: "",
-    image: null as File | null
+    image: null as File | null,
+    scheduleDate: "",
+    duration: "7",
+    durationUnit: "days"
   });
   const { toast } = useToast();
   const [filterType, setFilterType] = useState("all");
@@ -1453,24 +1456,37 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleDeleteCampaign = async (campaignId: string) => {
-    if (!confirm('Are you sure you want to delete this campaign?')) {
+  const handleDeleteCampaign = async (campaign: any) => {
+    if (!confirm('Are you sure you want to permanently delete this campaign and its image?')) {
       return;
     }
 
     try {
+      if (campaign.image_url) {
+        try {
+          const urlParts = campaign.image_url.split('/public/hms/');
+          if (urlParts.length > 1) {
+            const filePath = urlParts[1].split('?')[0]; // strip query params if any
+            await supabase.storage.from('hms').remove([filePath]);
+          }
+        } catch (e) {
+          console.error("Failed to delete image from storage:", e);
+        }
+      }
+
       const { error } = await supabase
         .from('awareness_campaigns')
         .delete()
-        .eq('id', campaignId);
+        .eq('id', campaign.id);
 
       if (error) throw error;
 
       toast({
         title: "Success",
-        description: "Campaign deleted successfully"
+        description: "Campaign completely deleted"
       });
 
+      setCampaigns(prev => prev.filter(c => c.id !== campaign.id));
       fetchCampaigns();
     } catch (error: any) {
       console.error('Error deleting campaign:', error);
@@ -1513,7 +1529,10 @@ const AdminDashboard = () => {
         .update({
           title: editCampaignData.title,
           subtitle: editCampaignData.subtitle,
-          image_url: imageUrl
+          image_url: imageUrl,
+          scheduled_date: editCampaignData.scheduleDate,
+          duration: parseInt(editCampaignData.duration),
+          duration_unit: editCampaignData.durationUnit
         })
         .eq('id', selectedCampaign.id);
 
@@ -1587,26 +1606,44 @@ const AdminDashboard = () => {
 
       if (roleError) throw roleError;
 
+      // Explicitly update profile correctly
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          first_name: newAdmin.firstName,
+          last_name: newAdmin.lastName,
+          other_name: newAdmin.otherName || null,
+          phone: newAdmin.phone,
+          gender: newAdmin.gender || null,
+          full_name: `${newAdmin.firstName} ${newAdmin.lastName}`.trim(),
+        })
+        .eq('id', authData.user.id);
+        
+      if (profileError) throw profileError;
+
       toast({
         title: "Success",
         description: "Admin account created successfully"
       });
 
-      // Refresh admin list
-      const { data: adminRoles } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role', 'admin');
+      // Delay fetch to allow Supabase trigger to complete
+      setTimeout(async () => {
+        // Refresh admin list
+        const { data: adminRoles } = await supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'admin');
 
-      if (adminRoles && adminRoles.length > 0) {
-        const adminUserIds = adminRoles.map(r => r.user_id);
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, other_name, full_name, email, phone')
-          .in('id', adminUserIds);
+        if (adminRoles && adminRoles.length > 0) {
+          const adminUserIds = adminRoles.map(r => r.user_id);
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, other_name, full_name, email, phone')
+            .in('id', adminUserIds);
 
-        setAdminUsers(profiles || []);
-      }
+          setAdminUsers(profiles || []);
+        }
+      }, 1500);
 
       // Reset form
       setNewAdmin({
@@ -3339,14 +3376,17 @@ const AdminDashboard = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {campaigns.map((campaign) => (
-                    <Card key={campaign.id}>
+                    <Card key={campaign.id} className={campaign.status === 'active' ? 'border-green-500 shadow-sm shadow-green-500/20 ring-1 ring-green-500/50' : ''}>
                       <CardHeader>
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <CardTitle>{campaign.title}</CardTitle>
                             <CardDescription className="mt-2">{campaign.subtitle || 'No description'}</CardDescription>
                           </div>
-                          <Badge variant={campaign.status === "active" ? "default" : campaign.status === "scheduled" ? "secondary" : "outline"}>
+                          <Badge 
+                            variant={campaign.status === "active" ? "default" : campaign.status === "scheduled" ? "secondary" : "outline"}
+                            className={campaign.status === "active" ? "bg-green-500 text-white hover:bg-green-600" : ""}
+                          >
                             {campaign.status}
                           </Badge>
                         </div>
@@ -3423,7 +3463,10 @@ const AdminDashboard = () => {
                                 setEditCampaignData({
                                   title: campaign.title,
                                   subtitle: campaign.subtitle || "",
-                                  image: null
+                                  image: null,
+                                  scheduleDate: campaign.scheduled_date || "",
+                                  duration: campaign.duration?.toString() || "7",
+                                  durationUnit: campaign.duration_unit || "days"
                                 });
                                 setIsEditCampaignModalOpen(true);
                               }}
@@ -3446,7 +3489,7 @@ const AdminDashboard = () => {
                             <Button
                               variant="outline"
                               className="flex-1 text-red-500 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => handleDeleteCampaign(campaign.id)}
+                              onClick={() => handleDeleteCampaign(campaign)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
                               Delete
@@ -4009,7 +4052,7 @@ const AdminDashboard = () => {
                 />
               </div>
 
-              <div className="space-y-2">
+            <div className="space-y-2">
                 <Label htmlFor="editCampaignImage">New Image (optional)</Label>
                 <div className="mt-2">
                   <Input
@@ -4025,6 +4068,45 @@ const AdminDashboard = () => {
                   <p className="text-xs text-muted-foreground mt-1">
                     Leave empty to keep the current image
                   </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="editScheduleDate">Start Date *</Label>
+                  <Input
+                    id="editScheduleDate"
+                    type="date"
+                    value={editCampaignData.scheduleDate}
+                    onChange={(e) => setEditCampaignData({ ...editCampaignData, scheduleDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Duration *</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      min="1"
+                      value={editCampaignData.duration}
+                      onChange={(e) => setEditCampaignData({ ...editCampaignData, duration: e.target.value })}
+                      className="w-20"
+                      required
+                    />
+                    <Select 
+                      value={editCampaignData.durationUnit} 
+                      onValueChange={(value) => setEditCampaignData({ ...editCampaignData, durationUnit: value })}
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Unit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="days">Days</SelectItem>
+                        <SelectItem value="weeks">Weeks</SelectItem>
+                        <SelectItem value="months">Months</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             </div>

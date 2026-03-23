@@ -120,9 +120,9 @@ export function LandingServices({ onBookClick }: Props) {
                         {/* Service Card 3 */}
                         <div
                             className="relative min-w-[280px] sm:min-w-[340px] h-[340px] rounded-[2rem] overflow-hidden group snap-center cursor-pointer"
-                            onClick={() => onBookClick('Specialist Care', 'https://images.unsplash.com/photo-1551076805-e166946c9ebf?auto=format&fit=crop&q=80&w=800')}
+                            onClick={() => onBookClick('Specialist Care', 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=800')}
                         >
-                            <img src="https://images.unsplash.com/photo-1551076805-e166946c9ebf?auto=format&fit=crop&q=80&w=800" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Specialist Care" />
+                            <img src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=800" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Specialist Care" />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent"></div>
                             <div className="absolute inset-x-6 bottom-6 flex items-end justify-between">
                                 <h3 className="text-2xl font-medium text-white tracking-tight leading-tight">

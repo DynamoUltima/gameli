@@ -1,29 +1,51 @@
-import { collection, getDocs, query, where, addDoc, updateDoc, deleteDoc, doc, setDoc, orderBy, limit } from 'firebase/firestore';
-import { ref, uploadBytes, deleteObject } from 'firebase/storage';
+import { collection, getDocs, query, where, addDoc, updateDoc, deleteDoc, doc, setDoc, orderBy, limit as firestoreLimit, getDoc } from 'firebase/firestore';
+import { ref, uploadBytes, deleteObject, getDownloadURL } from 'firebase/storage';
 import { signOut } from 'firebase/auth';
 import { auth, db, storage } from './client';
 
+// Tables that map directly to Firestore collections
+const TABLE_MAP: Record<string, string> = {
+  profiles: 'users',
+  user_roles: 'users', // user_roles queries are rerouted to the users collection
+};
+
+// Fields to remap per virtual table
+const FIELD_MAP: Record<string, Record<string, string>> = {
+  user_roles: {
+    user_id: 'id', // user_roles.user_id → users.id
+    role: 'role',
+  },
+};
+
+// Result shape transform per virtual table
+const toUserRole = (d: any) => ({ user_id: d.id, role: d.role, created_at: d.created_at });
+
 class QueryBuilder {
   tableName: string;
+  firestoreTable: string;
+  isVirtualTable: boolean;
   filters: any[];
   modifiers: any[];
   isSingle: boolean;
   isCount: boolean;
-  isDelete: boolean;
+  limitCount: number | null;
   updateData: any;
   insertData: any;
   operation: 'select' | 'insert' | 'update' | 'delete' | 'upsert' | null;
 
   constructor(tableName: string) {
-    this.tableName = tableName === 'profiles' ? 'users' : tableName;
+    this.tableName = tableName;
+    this.firestoreTable = TABLE_MAP[tableName] || tableName;
+    this.isVirtualTable = tableName === 'user_roles';
     this.filters = [];
     this.modifiers = [];
     this.isSingle = false;
     this.isCount = false;
+    this.limitCount = null;
     this.operation = null;
   }
 
-  select(fields?: string) {
+  select(_fields?: string) {
     this.operation = 'select';
     return this;
   }
@@ -44,7 +66,7 @@ class QueryBuilder {
     this.operation = 'delete';
     return this;
   }
-  
+
   upsert(data: any) {
     this.operation = 'upsert';
     this.insertData = data;
@@ -52,18 +74,36 @@ class QueryBuilder {
   }
 
   eq(field: string, value: any) {
-    this.filters.push(where(field, '==', value));
+    // Remap user_roles.user_id → users.id handled in then()
+    const mappedField = this.isVirtualTable && field === 'user_id' ? 'id' : field;
+    this.filters.push(where(mappedField, '==', value));
     return this;
   }
 
   in(field: string, values: any[]) {
+    const mappedField = this.isVirtualTable && field === 'user_id' ? 'id' : field;
     if (!values || values.length === 0) {
-      this.filters.push(where(field, 'in', ['__empty__']));
+      this.filters.push(where(mappedField, 'in', ['__EMPTY_PLACEHOLDER__']));
     } else {
-      // Firestore 'in' has a max of 10 items. Chunking may be required in complex apps, but handled simply here.
-      if (values.length > 10) values = values.slice(0, 10);
-      this.filters.push(where(field, 'in', values));
+      // Firestore 'in' supports up to 30 items in v9+
+      if (values.length > 30) values = values.slice(0, 30);
+      this.filters.push(where(mappedField, 'in', values));
     }
+    return this;
+  }
+
+  neq(field: string, value: any) {
+    this.filters.push(where(field, '!=', value));
+    return this;
+  }
+
+  gte(field: string, value: any) {
+    this.filters.push(where(field, '>=', value));
+    return this;
+  }
+
+  lte(field: string, value: any) {
+    this.filters.push(where(field, '<=', value));
     return this;
   }
 
@@ -73,8 +113,8 @@ class QueryBuilder {
   }
 
   limit(count: number) {
-    this.modifiers.push(limit(count));
-    this.isCount = true; 
+    this.limitCount = count;
+    this.modifiers.push(firestoreLimit(count));
     return this;
   }
 
@@ -89,60 +129,79 @@ class QueryBuilder {
   }
 
   // Act as a Promise so `await` triggers execution
-  async then(resolve: any, reject: any) {
+  async then(resolve: any, _reject: any) {
     try {
       if (this.operation === 'insert' || this.operation === 'upsert') {
         const items = Array.isArray(this.insertData) ? this.insertData : [this.insertData];
         const results = [];
         for (const item of items) {
-          // Check if we provided an ID
           if (item.id || item.user_id) {
             const docId = item.id || item.user_id;
-            await setDoc(doc(db, this.tableName, docId), item);
+            await setDoc(doc(db, this.firestoreTable, docId), item, { merge: true });
             results.push(item);
           } else {
-            const docRef = await addDoc(collection(db, this.tableName), item);
+            const docRef = await addDoc(collection(db, this.firestoreTable), item);
             results.push({ id: docRef.id, ...item });
           }
         }
-        return resolve({ 
-          error: null, 
-          data: Array.isArray(this.insertData) ? results : results[0] 
+        return resolve({
+          error: null,
+          data: Array.isArray(this.insertData) ? results : results[0],
         });
       }
 
-      const q = query(collection(db, this.tableName), ...this.filters, ...this.modifiers);
-      const snapshot = await getDocs(q);
+      // Handle direct doc fetch by ID when we have a single eq('id', ...) filter
+      const idFilter = this.filters.find(
+        (f) => f._field?.segments?.[0] === 'id' && f._value !== undefined
+      );
 
-      if (this.operation === 'update') {
-        for (const d of snapshot.docs) {
-          await updateDoc(doc(db, this.tableName, d.id), this.updateData);
+      let data: any[] = [];
+
+      // Handle empty placeholder (in query with 0 items)
+      const hasEmptyPlaceholder = this.filters.some(
+        (f) => Array.isArray(f._value) && f._value.includes('__EMPTY_PLACEHOLDER__')
+      );
+      if (hasEmptyPlaceholder) {
+        data = [];
+      } else {
+        const q = query(collection(db, this.firestoreTable), ...this.filters, ...this.modifiers);
+        const snapshot = await getDocs(q);
+
+        if (this.operation === 'update') {
+          for (const d of snapshot.docs) {
+            await updateDoc(doc(db, this.firestoreTable, d.id), this.updateData);
+          }
+          return resolve({ error: null, data: null });
         }
-        return resolve({ error: null, data: null });
+
+        if (this.operation === 'delete') {
+          for (const d of snapshot.docs) {
+            await deleteDoc(doc(db, this.firestoreTable, d.id));
+          }
+          return resolve({ error: null, data: null });
+        }
+
+        data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       }
 
-      if (this.operation === 'delete') {
-        for (const d of snapshot.docs) {
-          await deleteDoc(doc(db, this.tableName, d.id));
-        }
-        return resolve({ error: null, data: null });
+      // Transform result shape for virtual tables
+      if (this.isVirtualTable) {
+        data = data.map(toUserRole);
       }
 
-      // Default operation is select
-      let data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      if (this.isCount) {
-        return resolve({ count: data.length, data: data, error: null });
+      // Count mode
+      if (this.limitCount !== null && !this.isSingle) {
+        return resolve({ count: data.length, data, error: null });
       }
 
       if (this.isSingle) {
         return resolve({ data: data.length > 0 ? data[0] : null, error: null });
       }
 
-      resolve({ data, error: null });
+      resolve({ count: data.length, data, error: null });
     } catch (error) {
-      console.error("Shim Error:", error);
-      resolve({ data: null, count: null, error });
+      console.error('Shim Error:', error);
+      resolve({ data: null, count: 0, error });
     }
   }
 }
@@ -150,28 +209,20 @@ class QueryBuilder {
 export const supabase = {
   from: (table: string) => new QueryBuilder(table),
   auth: {
-    getSession: async () => {
-      // Mock session using current Firebase user
-      return { 
-        data: { 
-          session: auth.currentUser ? { 
-            user: auth.currentUser, 
-            access_token: await auth.currentUser.getIdToken() 
-          } : null 
-        } 
-      };
-    },
-    getUser: async () => ({ 
-      data: { user: auth.currentUser } 
+    getSession: async () => ({
+      data: {
+        session: auth.currentUser
+          ? { user: auth.currentUser, access_token: await auth.currentUser.getIdToken() }
+          : null,
+      },
     }),
+    getUser: async () => ({ data: { user: auth.currentUser } }),
     signOut: async () => signOut(auth),
-    signUp: async () => ({ error: { message: "Use Firebase Client" } }),
-    signInWithPassword: async () => ({ error: { message: "Use Firebase Client" } }),
-    resetPasswordForEmail: async () => ({ error: { message: "Use Firebase Client" } }),
-    updateUser: async () => ({ error: { message: "Use Firebase Client" } }),
-    onAuthStateChange: () => {
-      return { data: { subscription: { unsubscribe: () => {} } } };
-    }
+    signUp: async () => ({ error: { message: 'Use Firebase Client directly' } }),
+    signInWithPassword: async () => ({ error: { message: 'Use Firebase Client directly' } }),
+    resetPasswordForEmail: async () => ({ error: { message: 'Use Firebase Client directly' } }),
+    updateUser: async () => ({ error: { message: 'Use Firebase Client directly' } }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
   },
   storage: {
     from: (bucket: string) => ({
@@ -180,16 +231,16 @@ export const supabase = {
           const fileRef = ref(storage, `${bucket}/${path}`);
           await uploadBytes(fileRef, file);
           return { data: { path }, error: null };
-        } catch(error) {
+        } catch (error) {
           return { data: null, error };
         }
       },
       getPublicUrl: (path: string) => {
-        const projectId = "gameliel-hospital";
-        return { 
-          data: { 
-            publicUrl: `https://firebasestorage.googleapis.com/v0/b/${projectId}.firebasestorage.app/o/${bucket}%2F${encodeURIComponent(path)}?alt=media` 
-          } 
+        const projectId = 'gameliel-hospital';
+        return {
+          data: {
+            publicUrl: `https://firebasestorage.googleapis.com/v0/b/${projectId}.firebasestorage.app/o/${encodeURIComponent(`${bucket}/${path}`)}?alt=media`,
+          },
         };
       },
       remove: async (paths: string[]) => {
@@ -199,10 +250,10 @@ export const supabase = {
             await deleteObject(fileRef);
           }
           return { data: true, error: null };
-        } catch(error) {
+        } catch (error) {
           return { data: null, error };
         }
-      }
-    })
-  }
+      },
+    }),
+  },
 };

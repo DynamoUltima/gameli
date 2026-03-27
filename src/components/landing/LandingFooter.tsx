@@ -12,7 +12,7 @@ export function LandingFooter() {
                         </a>
                         <p className="text-white/70 text-base font-normal leading-relaxed max-w-sm">
                             Expert medical care for healthy, confident lives at every
-                            age—delivered with comfort, precision, and trust.
+                            age delivered with comfort, precision, and trust.
                         </p>
                         <div className="flex items-center gap-3 mt-2">
                             <a href="https://www.instagram.com/st.gamalielshospital/" target="_blank" rel="noopener noreferrer" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-900 transition-colors shadow-sm">

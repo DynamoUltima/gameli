@@ -28,7 +28,7 @@ export function LandingServices({ onBookClick }: Props) {
                         <p className="text-base font-medium text-slate-500 mb-4 tracking-tight">
                             Our Features /
                         </p>
-                        <h2 className="text-4xl sm:text-5xl lg:text-5xl font-medium text-slate-900 tracking-tighter uppercase leading-[1.1] mb-6 max-w-sm">
+                        <h2 className="text-3xl sm:text-4xl lg:text-4xl font-medium text-slate-900 tracking-tighter uppercase leading-[1.1] mb-6 max-w-sm">
                             Discover Our Signature
                             <br />
                             Medical Departments
@@ -37,12 +37,7 @@ export function LandingServices({ onBookClick }: Props) {
 
                     <div className="mt-12 lg:mt-0">
                         {/* Reviews block */}
-                        <div className="flex items-center gap-5 mb-8">
-                            <div className="flex -space-x-3">
-                                <img className="w-12 h-12 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100" alt="Reviewer" />
-                                <img className="w-12 h-12 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=100" alt="Reviewer" />
-                                <img className="w-12 h-12 rounded-full border-2 border-white object-cover" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=100" alt="Reviewer" />
-                            </div>
+                        <div className="mb-8">
                             <div>
                                 <p className="text-xl font-medium text-slate-900 leading-tight tracking-tight">
                                     2,500+
@@ -52,7 +47,7 @@ export function LandingServices({ onBookClick }: Props) {
                                 </p>
                             </div>
                         </div>
-                        <p className="text-lg font-normal text-slate-600 max-w-sm mb-10 leading-relaxed">
+                        <p className="text-base font-normal text-slate-600 max-w-sm mb-10 leading-relaxed">
                             Discover delighted patient reviews about their comforting and
                             satisfying medical care experience.
                         </p>
@@ -71,7 +66,7 @@ export function LandingServices({ onBookClick }: Props) {
 
                 {/* Right Side: Description & Carousel */}
                 <div className="lg:col-span-8 flex flex-col justify-between">
-                    <p className="text-xl font-normal text-slate-600 max-w-xl mb-12 lg:ml-auto leading-relaxed tracking-tight">
+                    <p className="text-base sm:text-lg font-normal text-slate-600 max-w-xl mb-12 lg:ml-auto leading-relaxed tracking-tight">
                         Experience modern medical care delivered with comfort, precision, and
                         attention to detail. St. Gamaliel's Hospital provides a state-of-the-art, welcoming
                         environment designed to promote rapid recovery and well-being.
@@ -101,9 +96,9 @@ export function LandingServices({ onBookClick }: Props) {
                         {/* Service Card 2 */}
                         <div
                             className="relative min-w-[280px] sm:min-w-[340px] h-[340px] rounded-[2rem] overflow-hidden group snap-center cursor-pointer"
-                            onClick={() => onBookClick('General Checkups', 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=800')}
+                            onClick={() => onBookClick('General Checkups', 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&q=80&w=800')}
                         >
-                            <img src="https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=800" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="General Checkups" />
+                            <img src="https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&q=80&w=800" className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="General Checkups" />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent"></div>
                             <div className="absolute inset-x-6 bottom-6 flex items-end justify-between">
                                 <h3 className="text-2xl font-medium text-white tracking-tight leading-tight">

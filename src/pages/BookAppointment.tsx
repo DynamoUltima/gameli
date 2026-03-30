@@ -32,6 +32,8 @@ const BookAppointment = () => {
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [generalAvailability, setGeneralAvailability] = useState<any[]>([]);
   const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
+  // Authoritative phone from the DB — always used for SMS, not the form field
+  const [dbPhone, setDbPhone] = useState<string>("");
 
   // Use the doctors hook for data
   const { doctors, specialties, loading: doctorsLoading } = useDoctors();
@@ -70,13 +72,15 @@ const BookAppointment = () => {
   // Prefill personal info from profiles
   useEffect(() => {
     const loadProfile = async () => {
-      if (!user?.id) return;
+      if (!user?.uid) return;
       const { data: profile } = await supabase
         .from("profiles")
         .select("full_name, phone, email, date_of_birth, gender")
-        .eq("id", user.id)
+        .eq("id", user.uid)
         .maybeSingle();
       if (profile) {
+        // Store DB phone separately — this is the authoritative number for SMS
+        if (profile.phone) setDbPhone(profile.phone);
         setFormData((prev) => ({
           ...prev,
           name: profile.full_name || prev.name,
@@ -88,7 +92,7 @@ const BookAppointment = () => {
       }
     };
     loadProfile();
-  }, [user?.id]);
+  }, [user?.uid]);
 
   const doctorsForClinic = useMemo(() => {
     if (!formData.clinic) return [];
@@ -282,12 +286,13 @@ const BookAppointment = () => {
       const { data: appt, error: apptErr } = await supabase
         .from("appointments" as any)
         .insert({
-          patient_id: user?.id,
+          patient_id: user?.uid,
           doctor_id: doctorId,
           clinic: (specialties.find(s => s.id === formData.clinic)?.name) || null,
           specialty_id: formData.clinic || null,
           type: type,
           scheduled_at: scheduledAt ?? new Date().toISOString(),
+          created_at: new Date().toISOString(),
           symptoms: formData.symptoms || null,
           location: formData.location || null,
           status: type === "hospital" ? "pending" : "confirmed",
@@ -305,7 +310,8 @@ const BookAppointment = () => {
       
       const notificationData = {
         patientEmail: formData.email,
-        patientPhone: formData.phone,
+        // Use the DB phone as the primary SMS target, fall back to form phone
+        patientPhone: dbPhone || formData.phone,
         patientName: formData.name,
         doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
         specialty: specialties.find(s => s.id === formData.clinic)?.name || '',
@@ -340,7 +346,7 @@ const BookAppointment = () => {
           .from("medical_forms" as any)
           .insert({
             appointment_id: (appt as any).id,
-            patient_id: user?.id,
+            patient_id: user?.uid,
             form_type: primaryFormType,
             status: 'pending'
           });
@@ -361,7 +367,7 @@ const BookAppointment = () => {
 
       console.log({
         homeVisitDebug: {
-          patient_id: user?.id,
+          patient_id: user?.uid,
           doctor_id: doctorId,
           clinic: (specialties.find(s => s.id === formData.clinic)?.name) || null,
           specialty_id: formData.clinic || null,

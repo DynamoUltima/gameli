@@ -1,5 +1,6 @@
 import { X, CheckCircle, ArrowRight, ShieldCheck, Wand2 } from 'lucide-react';
-import React from 'react';
+import React, { useState } from 'react';
+import { usePaystackPayment } from 'react-paystack';
 
 interface Props {
     isOpen: boolean;
@@ -12,6 +13,20 @@ interface Props {
 
 export function LandingBookingModal({ isOpen, onClose, serviceConfig, currentStep, onNext, onPrev }: Props) {
     const totalSteps = 4;
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [patientEmail, setPatientEmail] = useState("");
+
+    const amountToPay = serviceConfig?.title === 'Emergency Care' ? 500 : 250;
+    
+    const paystackConfig = {
+        reference: (new Date()).getTime().toString(),
+        email: patientEmail || "guest@example.com",
+        amount: amountToPay * 100, 
+        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "",
+        currency: "GHS",
+    };
+
+    const initializePayment = usePaystackPayment(paystackConfig);
 
     const handleNextClick = () => {
         if (currentStep === 3) {
@@ -21,6 +36,19 @@ export function LandingBookingModal({ isOpen, onClose, serviceConfig, currentSte
                 form.reportValidity();
                 return;
             }
+            if (!isSubmitting) {
+                setIsSubmitting(true);
+                initializePayment({
+                    onSuccess: () => {
+                        setIsSubmitting(false);
+                        onNext();
+                    },
+                    onClose: () => {
+                        setIsSubmitting(false);
+                    }
+                });
+            }
+            return;
         } else if (currentStep === 4) {
             onClose();
             return;
@@ -241,7 +269,7 @@ export function LandingBookingModal({ isOpen, onClose, serviceConfig, currentSte
 
                                 <div className="space-y-1.5">
                                     <label className="text-sm font-semibold text-slate-700 block">Email Address</label>
-                                    <input type="email" required defaultValue="you@example.com" className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-sm" placeholder="john@example.com" />
+                                    <input type="email" value={patientEmail} onChange={(e) => setPatientEmail(e.target.value)} required className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-sm" placeholder="john@example.com" />
                                 </div>
 
                                 <button type="submit" id="hiddenSubmit" className="hidden"></button>
@@ -279,15 +307,18 @@ export function LandingBookingModal({ isOpen, onClose, serviceConfig, currentSte
                         <button
                             type="button"
                             onClick={handleNextClick}
-                            className="px-8 py-3 bg-slate-900 text-white rounded-xl font-semibold text-sm hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10 flex items-center gap-2"
+                            disabled={isSubmitting}
+                            className="px-8 py-3 bg-slate-900 text-white rounded-xl font-semibold text-sm hover:bg-slate-800 disabled:opacity-75 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/10 flex items-center gap-2"
                         >
                             <span>
-                                {currentStep === 1 ? 'Continue to Schedule' : currentStep === 2 ? 'Continue to Details' : 'Confirm Booking'}
+                                {isSubmitting ? 'Processing...' : currentStep === 1 ? 'Continue to Schedule' : currentStep === 2 ? 'Continue to Details' : 'Confirm & Pay'}
                             </span>
-                            {currentStep === 3 ? (
-                                <CheckCircle className="w-5 h-5 stroke-[1.5px]" />
-                            ) : (
-                                <ArrowRight className="w-5 h-5 stroke-[1.5px]" />
+                            {!isSubmitting && (
+                                currentStep === 3 ? (
+                                    <CheckCircle className="w-5 h-5 stroke-[1.5px]" />
+                                ) : (
+                                    <ArrowRight className="w-5 h-5 stroke-[1.5px]" />
+                                )
                             )}
                         </button>
                     </div>

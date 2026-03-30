@@ -1,41 +1,48 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { ArrowLeft, CreditCard, Smartphone, Lock, Check } from "lucide-react";
+import { ArrowLeft, Check, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { supabase } from "@/integrations/supabase/client";
 import { sendEmail } from "@/lib/emailService";
+import { sendSms } from "@/lib/smsService";
 import { format } from "date-fns";
+import { usePaystackPayment } from "react-paystack";
+import { useAuth } from "@/hooks/useAuth";
 
 const Payment = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const amount = searchParams.get("amount") || "45";
-  const [paymentMethod, setPaymentMethod] = useState("momo");
+  const appointmentId = searchParams.get("appointmentId");
+  const appointmentType = searchParams.get("type") || "online";
+  const { user } = useAuth();
+  
   const [processing, setProcessing] = useState(false);
+  const [patientData, setPatientData] = useState<any>(null);
 
-  const [momoData, setMomoData] = useState({
-    provider: "mtn",
-    phone: ""
-  });
+  useEffect(() => {
+    const fetchPatientData = async () => {
+      if (user) {
+        const userId = (user as any).uid || (user as any).id;
+        const { data } = await (supabase.from('profiles').select('*').eq('id', userId).maybeSingle() as any);
+        setPatientData(data);
+      }
+    };
+    fetchPatientData();
+  }, [user]);
 
-  const [cardData, setCardData] = useState({
-    number: "",
-    name: "",
-    expiry: "",
-    cvv: ""
-  });
+  const appointmentLabels: { [key: string]: { name: string; price: string; duration?: string } } = {
+    online: { name: "Online Consultation", price: `${amount} GHS`, duration: "45 minutes" },
+    hospital: { name: "Hospital Visit", price: `${amount} GHS`, duration: "N/A" },
+    home: { name: "Home Visit", price: `${amount} GHS`, duration: "N/A" }
+  };
 
-  const handlePayment = async () => {
+  const handlePaymentSuccess = async (reference: any) => {
     setProcessing(true);
-
     try {
-      const appointmentId = searchParams.get("appointmentId");
       if (appointmentId) {
         // Update to paid
         const { error: updateErr } = await supabase
@@ -53,25 +60,43 @@ const Payment = () => {
           .maybeSingle();
 
         if (appt && appt.patient_id) {
-            const { data: patientData } = await supabase.from('profiles').select('*').eq('id', appt.patient_id).maybeSingle();
             let doctorName = 'Your Doctor';
+            let docPhone = '';
+            let docEmail = '';
+            
             if (appt.doctor_id) {
                const { data: docProfile } = await supabase.from('profiles').select('*').eq('id', appt.doctor_id).maybeSingle();
-               if (docProfile) doctorName = docProfile.full_name;
+               if (docProfile) {
+                 doctorName = docProfile.full_name;
+                 docPhone = docProfile.phone;
+                 docEmail = docProfile.email;
+               }
             }
             
             if (patientData && patientData.email) {
               const dateObj = new Date(appt.scheduled_at);
-              sendEmail('payment_receipt', {
+              const notificationData = {
                 patientEmail: patientData.email,
+                patientPhone: patientData.phone,
                 patientName: patientData.full_name || 'Patient',
                 doctorName: doctorName,
+                doctorPhone: docPhone,
+                doctorEmail: docEmail,
                 specialty: appt.clinic || 'General',
                 date: format(dateObj, 'MMMM do, yyyy'),
                 time: format(dateObj, 'h:mm a'),
                 amount: amount,
                 type: appointmentLabels[appointmentType]?.name || "Consultation"
-              });
+              };
+
+              // Send receipt via email and SMS
+              await sendEmail('payment_receipt', notificationData);
+              await sendSms('payment_receipt', notificationData);
+              
+              // Also send appointment confirmation if it wasn't triggered before
+              // Since they book and pay sequentially, we handle both here
+              await sendEmail('appointment_confirmation', notificationData);
+              await sendSms('appointment_confirmation', notificationData);
             }
         }
       }
@@ -80,17 +105,28 @@ const Payment = () => {
       navigate(`/payment-success?appointmentId=${appointmentId || ''}`);
     } catch (error) {
        console.error("Payment processing error:", error);
-       toast.error("Failed to process payment");
+       toast.error("An error occurred while confirming your payment.");
     } finally {
        setProcessing(false);
     }
   };
 
-  const appointmentType = searchParams.get("type") || "online";
-  const appointmentLabels: { [key: string]: { name: string; price: string; duration?: string } } = {
-    online: { name: "Online Consultation", price: `${amount} GHS`, duration: "45 minutes" },
-    hospital: { name: "Hospital Visit", price: `${amount} GHS`, duration: "N/A" },
-    home: { name: "Home Visit", price: `${amount} GHS`, duration: "N/A" }
+  const config = {
+    reference: (new Date()).getTime().toString(),
+    email: patientData?.email || user?.email || "patient@example.com",
+    amount: parseInt(amount) * 100, // Paystack amount is in kobo/pesewas
+    publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "",
+    currency: "GHS",
+  };
+
+  const initializePayment = usePaystackPayment(config);
+
+  const triggerPayment = () => {
+    setProcessing(true);
+    initializePayment({
+        onSuccess: (reference) => handlePaymentSuccess(reference),
+        onClose: () => setProcessing(false),
+    });
   };
 
   return (
@@ -104,15 +140,14 @@ const Payment = () => {
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
-          {/* Payment Form */}
+          {/* Payment Info */}
           <div className="md:col-span-2">
             <Card>
               <CardHeader>
-                <CardTitle>Payment Details</CardTitle>
-                <CardDescription>Choose your preferred payment method</CardDescription>
+                <CardTitle>Checkout</CardTitle>
+                <CardDescription>Review your details and proceed to payment</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Appointment Type & Price Label */}
                 <div className="p-4 bg-primary/10 border border-primary/20 rounded-lg">
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
@@ -125,147 +160,27 @@ const Payment = () => {
                     </div>
                   </div>
                 </div>
-                {/* Payment Method Selection */}
-                <div className="space-y-3">
-                  <Label>Select Payment Method</Label>
-                  <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
-                    <div className="flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer hover:border-primary transition-colors">
-                      <RadioGroupItem value="momo" id="momo-payment" />
-                      <Label htmlFor="momo-payment" className="flex items-center gap-3 flex-1 cursor-pointer">
-                        <div className="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center">
-                          <Smartphone className="w-6 h-6 text-warning" />
-                        </div>
-                        <div>
-                          <p className="font-medium">Mobile Money</p>
-                          <p className="text-sm text-muted-foreground">MTN, Vodafone, AirtelTigo</p>
-                        </div>
-                      </Label>
-                    </div>
 
-                    <div className="flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer hover:border-primary transition-colors">
-                      <RadioGroupItem value="card" id="card-payment" />
-                      <Label htmlFor="card-payment" className="flex items-center gap-3 flex-1 cursor-pointer">
-                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                          <CreditCard className="w-6 h-6 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium">Debit Card</p>
-                          <p className="text-sm text-muted-foreground">Visa, MasterCard</p>
-                        </div>
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-
-                {/* Mobile Money Form */}
-                {paymentMethod === "momo" && (
-                  <div className="space-y-4 pt-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="provider">Mobile Money Provider</Label>
-                      <RadioGroup value={momoData.provider} onValueChange={(value) => setMomoData({ ...momoData, provider: value })}>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="flex items-center space-x-2 p-3 border rounded-lg cursor-pointer hover:border-primary">
-                            <RadioGroupItem value="mtn" id="mtn" />
-                            <Label htmlFor="mtn" className="cursor-pointer font-normal">MTN</Label>
-                          </div>
-                          <div className="flex items-center space-x-2 p-3 border rounded-lg cursor-pointer hover:border-primary">
-                            <RadioGroupItem value="vodafone" id="vodafone" />
-                            <Label htmlFor="vodafone" className="cursor-pointer font-normal">Vodafone</Label>
-                          </div>
-                          <div className="flex items-center space-x-2 p-3 border rounded-lg cursor-pointer hover:border-primary">
-                            <RadioGroupItem value="airteltigo" id="airteltigo" />
-                            <Label htmlFor="airteltigo" className="cursor-pointer font-normal">AirtelTigo</Label>
-                          </div>
-                        </div>
-                      </RadioGroup>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="momo-phone">Mobile Money Number</Label>
-                      <Input
-                        id="momo-phone"
-                        placeholder="0XX XXX XXXX"
-                        value={momoData.phone}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/\D/g, '');
-                          setMomoData({ ...momoData, phone: value });
-                        }}
-                      />
-                      <p className="text-sm text-muted-foreground">
-                        You'll receive a prompt on your phone to authorize the payment
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Card Payment Form */}
-                {paymentMethod === "card" && (
-                  <div className="space-y-4 pt-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="card-number">Card Number</Label>
-                      <Input
-                        id="card-number"
-                        placeholder="1234 5678 9012 3456"
-                        value={cardData.number}
-                        onChange={(e) => setCardData({ ...cardData, number: e.target.value })}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="card-name">Cardholder Name</Label>
-                      <Input
-                        id="card-name"
-                        placeholder="John Doe"
-                        value={cardData.name}
-                        onChange={(e) => setCardData({ ...cardData, name: e.target.value })}
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="expiry">Expiry Date</Label>
-                        <Input
-                          id="expiry"
-                          placeholder="MM/YY"
-                          value={cardData.expiry}
-                          onChange={(e) => setCardData({ ...cardData, expiry: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="cvv">CVV</Label>
-                        <Input
-                          id="cvv"
-                          placeholder="123"
-                          type="password"
-                          maxLength={3}
-                          value={cardData.cvv}
-                          onChange={(e) => setCardData({ ...cardData, cvv: e.target.value })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Security Notice */}
                 <div className="flex items-start gap-3 p-4 bg-muted rounded-lg">
                   <Lock className="w-5 h-5 text-muted-foreground mt-0.5" />
                   <div>
-                    <p className="font-medium text-sm">Secure Payment</p>
+                    <p className="font-medium text-sm">Secure Payment with Paystack</p>
                     <p className="text-sm text-muted-foreground">
-                      Your payment information is encrypted and secure. We never store your card details.
+                      Click below to securely proceed with Mobile Money or Debit Card.
                     </p>
                   </div>
                 </div>
 
                 <Button
-                  className="w-full"
-                  size="lg"
-                  onClick={handlePayment}
-                  disabled={processing}
+                  className="w-full h-12 text-lg"
+                  onClick={triggerPayment}
+                  disabled={processing || !patientData || !import.meta.env.VITE_PAYSTACK_PUBLIC_KEY}
                 >
-                  {processing ? "Processing..." : `Pay ${amount} GHS`}
-                  {!processing && <Check className="w-4 h-4 ml-2" />}
+                  {processing ? "Processing..." : `Pay ${amount} GHS with Paystack`}
                 </Button>
+                {!import.meta.env.VITE_PAYSTACK_PUBLIC_KEY && (
+                    <p className="text-red-500 text-sm mt-2 text-center">Paystack Public Key is missing.</p>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -307,10 +222,6 @@ const Payment = () => {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Check className="w-4 h-4 text-success" />
                     <span>Email & SMS receipt</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Check className="w-4 h-4 text-success" />
-                    <span>Video call link sent</span>
                   </div>
                 </div>
               </CardContent>

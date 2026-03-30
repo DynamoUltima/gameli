@@ -27,6 +27,32 @@ export async function sendSms(
     return { error: 'SMS service not configured' };
   }
 
+  let phone = '';
+  let message = '';
+
+  switch (type) {
+    case 'appointment_confirmation':
+      phone = data.patientPhone;
+      message = `Dear ${data.patientName}, your appointment with Dr. ${data.doctorName} for ${data.specialty} is confirmed for ${data.date} at ${data.time}.`;
+      break;
+    case 'doctor_booking_notification':
+      phone = data.doctorPhone;
+      message = `Dr. ${data.doctorName}, you have a new ${data.type} appointment with ${data.patientName} on ${data.date} at ${data.time}.`;
+      break;
+    case 'payment_receipt':
+      phone = data.patientPhone;
+      message = `Dear ${data.patientName}, payment of GHS ${data.amount} received for your appointment on ${data.date}. Thank you!`;
+      break;
+    default:
+      console.warn(`Unknown SMS type: ${type}`);
+      return { error: `Unknown SMS type` };
+  }
+
+  if (!phone) {
+    console.warn(`No phone number provided for SMS type: ${type}`);
+    return { error: 'No phone number provided' };
+  }
+
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -40,7 +66,7 @@ export async function sendSms(
     const res = await fetch(SMS_API_URL, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ type, data }),
+      body: JSON.stringify({ phone, message }),
     });
 
     const result = await res.json();

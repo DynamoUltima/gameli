@@ -67,7 +67,7 @@ const Auth = () => {
 
   // Handle redirect after role is loaded
   useEffect(() => {
-    if (currentUserId && !roleLoading && role) {
+    if (currentUserId && !roleLoading && role && !isLoading) {
       const getDashboardPath = () => {
         if (redirectTo && redirectTo !== "/" && redirectTo.includes("/book/")) {
           return redirectTo;
@@ -83,7 +83,7 @@ const Auth = () => {
       };
       navigate(getDashboardPath());
     }
-  }, [currentUserId, role, roleLoading, redirectTo, navigate]);
+  }, [currentUserId, role, roleLoading, isLoading, redirectTo, navigate]);
 
   // Registration form
   const [registerData, setRegisterData] = useState({
@@ -162,6 +162,17 @@ const Auth = () => {
       return;
     }
 
+    // Check if email is already registered in Firestore
+    const emailQuery = query(
+      collection(db, 'users'),
+      where('email', '==', registerData.email.trim().toLowerCase())
+    );
+    const emailSnapshot = await getDocs(emailQuery);
+    if (!emailSnapshot.empty) {
+      toast.error("An account with this email address already exists. Please sign in or use a different email.");
+      return;
+    }
+
     if (registerData.hospitalCardId.trim()) {
       const q = query(
         collection(db, 'users'), 
@@ -188,10 +199,11 @@ const Auth = () => {
 
       await setDoc(doc(db, 'users', user.uid), {
         id: user.uid,
-        email: registerData.email,
+        email: registerData.email.trim().toLowerCase(),
         first_name: registerData.firstName,
         last_name: registerData.lastName,
         other_name: registerData.otherName,
+        full_name: `${registerData.firstName || ''} ${registerData.otherName ? registerData.otherName + ' ' : ''}${registerData.lastName || ''}`.replace(/\s+/g, ' ').trim(),
         phone: registerData.phone,
         date_of_birth: registerData.dateOfBirth || null,
         hospital_card_id: registerData.hospitalCardId.trim() || null,

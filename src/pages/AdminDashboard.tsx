@@ -22,6 +22,10 @@ import { EditDoctorDialog } from "@/components/admin/EditDoctorDialog";
 import { DoctorCalendarView } from "@/components/admin/DoctorCalendarView";
 import { generateReport } from "@/utils/reportGenerator";
 import { supabase } from "@/integrations/supabase/client";
+import { db, app } from "@/integrations/firebase/client";
+import { initializeApp, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { collection, query, where, getDocs, doc, deleteDoc, orderBy, limit, updateDoc, setDoc } from "firebase/firestore";
 import { v4 as uuidv4 } from 'uuid';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -411,6 +415,7 @@ const AdminDashboard = () => {
 
   // Stats state
   const [totalPatients, setTotalPatients] = useState<number>(0);
+  const [totalDoctors, setTotalDoctors] = useState<number>(0);
   const stats = {
     totalAppointments: 42,
     appointmentsTrend: 12,
@@ -420,21 +425,29 @@ const AdminDashboard = () => {
     telemedicineTrend: 23,
     totalRevenue: 1080,
     revenueTrend: 15,
-    totalDoctors: 12,
-    activeDoctors: 10,
+    totalDoctors,
+    activeDoctors: totalDoctors,
   };
-  // Fetch total patient count from profiles table
+  // Fetch total patient count from Firestore
   useEffect(() => {
     const fetchPatientCount = async () => {
-      const { count, error } = await supabase
-        .from('profiles')
-        .select('id', { count: 'exact', head: true });
-      if (!error && typeof count === 'number') {
-        setTotalPatients(count);
-      }
+      const q = query(collection(db, 'users'), where('role', '==', 'patient'));
+      const snapshot = await getDocs(q);
+      setTotalPatients(snapshot.size);
     };
     fetchPatientCount();
   }, []);
+
+  // Fetch total doctor count from Firestore
+  useEffect(() => {
+    const fetchDoctorCount = async () => {
+      const q = query(collection(db, 'users'), where('role', '==', 'doctor'));
+      const snapshot = await getDocs(q);
+      setTotalDoctors(snapshot.size);
+    };
+    fetchDoctorCount();
+  }, []);
+
 
   const fetchCampaigns = async () => {
     try {
@@ -458,77 +471,40 @@ const AdminDashboard = () => {
   }, []);
 
   // Fetch admin users
+  const fetchAdmins = async () => {
+    try {
+      const q = query(collection(db, 'users'), where('role', '==', 'admin'));
+      const snapshot = await getDocs(q);
+      const admins = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAdminUsers(admins);
+    } catch (error) {
+      console.error('Error fetching admin users:', error);
+    } finally {
+      setLoadingAdmins(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchAdmins = async () => {
-      try {
-        const { data: adminRoles, error: rolesError } = await supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'admin');
-
-        if (rolesError) throw rolesError;
-
-        if (!adminRoles || adminRoles.length === 0) {
-          setAdminUsers([]);
-          setLoadingAdmins(false);
-          return;
-        }
-
-        // Fetch profiles for admin users
-        const adminUserIds = adminRoles.map(r => r.user_id);
-        const { data: profiles, error: profilesError } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, other_name, full_name, email, phone, gender')
-          .in('id', adminUserIds);
-
-        if (profilesError) throw profilesError;
-
-        setAdminUsers(profiles || []);
-      } catch (error) {
-        console.error('Error fetching admin users:', error);
-      } finally {
-        setLoadingAdmins(false);
-      }
-    };
-
     fetchAdmins();
   }, []);
 
   // Fetch patient users
+  const fetchPatients = async () => {
+    try {
+      const q = query(collection(db, 'users'), where('role', '==', 'patient'));
+      const snapshot = await getDocs(q);
+      const patients = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setPatientUsers(patients);
+    } catch (error) {
+      console.error('Error fetching patient users:', error);
+    } finally {
+      setLoadingPatients(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const { data: patientRoles, error: rolesError } = await supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'patient');
-
-        if (rolesError) throw rolesError;
-
-        if (!patientRoles || patientRoles.length === 0) {
-          setPatientUsers([]);
-          setLoadingPatients(false);
-          return;
-        }
-
-        // Fetch profiles for patient users
-        const patientUserIds = patientRoles.map(r => r.user_id);
-        const { data: profiles, error: profilesError } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, other_name, full_name, email, phone, gender, date_of_birth, hospital_card_id, created_at')
-          .in('id', patientUserIds)
-          .order('created_at', { ascending: false });
-
-        if (profilesError) throw profilesError;
-
-        setPatientUsers(profiles || []);
-      } catch (error) {
-        console.error('Error fetching patient users:', error);
-      } finally {
-        setLoadingPatients(false);
-      }
-    };
-
     fetchPatients();
   }, []);
 
@@ -552,13 +528,16 @@ const AdminDashboard = () => {
 
         if (pendingAppointments) {
           for (const apt of pendingAppointments) {
-            const { data: patient } = await supabase
-              .from('profiles')
-              .select('full_name, first_name, last_name')
-              .eq('id', apt.patient_id)
-              .single();
-
-            const pName = patient?.full_name || (patient?.first_name ? `${patient.first_name} ${patient.last_name || ''}`.trim() : null) || 'Patient';
+            // Look up patient name from Firestore
+            let pName = 'Patient';
+            try {
+              const patientQ = query(collection(db, 'users'), where('id', '==', apt.patient_id));
+              const patientSnap = await getDocs(patientQ);
+              if (!patientSnap.empty) {
+                const p = patientSnap.docs[0].data();
+                pName = p.full_name || (p.first_name ? `${p.first_name} ${p.last_name || ''}`.trim() : null) || 'Patient';
+              }
+            } catch {}
 
             notificationsList.push({
               id: apt.id,
@@ -584,13 +563,17 @@ const AdminDashboard = () => {
 
         if (confirmedAppointments) {
           for (const apt of confirmedAppointments) {
-            const { data: patient } = await supabase
-              .from('profiles')
-              .select('full_name, first_name, last_name')
-              .eq('id', apt.patient_id)
-              .single();
+            // Look up patient name from Firestore
+            let pName = 'Patient';
+            try {
+              const patientQ = query(collection(db, 'users'), where('id', '==', apt.patient_id));
+              const patientSnap = await getDocs(patientQ);
+              if (!patientSnap.empty) {
+                const p = patientSnap.docs[0].data();
+                pName = p.full_name || (p.first_name ? `${p.first_name} ${p.last_name || ''}`.trim() : null) || 'Patient';
+              }
+            } catch {}
 
-            const pName = patient?.full_name || (patient?.first_name ? `${patient.first_name} ${patient.last_name || ''}`.trim() : null) || 'Patient';
 
             notificationsList.push({
               id: `confirmed-${apt.id}`,
@@ -603,30 +586,25 @@ const AdminDashboard = () => {
         }
 
         // 3. Get new patient registrations (last 7 days)
-        const { data: newPatients } = await supabase
-          .from('user_roles')
-          .select('user_id, created_at')
-          .eq('role', 'patient')
-          .gte('created_at', sevenDaysAgo.toISOString())
-          .order('created_at', { ascending: false })
-          .limit(5);
+        const newPatientsQ = query(
+          collection(db, 'users'),
+          where('role', '==', 'patient'),
+          where('created_at', '>=', sevenDaysAgo.toISOString())
+        );
+        const newPatientsSnap = await getDocs(newPatientsQ);
+        const newPatients = newPatientsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() as any }))
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 5);
 
-        if (newPatients) {
-          for (const patient of newPatients) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', patient.user_id)
-              .single();
-
-            notificationsList.push({
-              id: `new-patient-${patient.user_id}`,
-              type: 'new_patient',
-              message: `New patient registered: ${profile?.full_name || 'Unknown'}`,
-              time: patient.created_at,
-              icon: 'user'
-            });
-          }
+        for (const patient of newPatients) {
+          notificationsList.push({
+            id: `new-patient-${patient.id}`,
+            type: 'new_patient',
+            message: `New patient registered: ${patient.full_name || `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || 'Unknown'}`,
+            time: patient.created_at,
+            icon: 'user'
+          });
         }
 
         // Sort by time (most recent first) and limit to 15
@@ -1580,70 +1558,47 @@ const AdminDashboard = () => {
 
     setAddingAdmin(true);
     try {
-      // Create the admin user account
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newAdmin.email,
-        password: newAdmin.password,
-        options: {
-          data: {
-            first_name: newAdmin.firstName,
-            last_name: newAdmin.lastName,
-            other_name: newAdmin.otherName || '',
-            phone: newAdmin.phone,
-            gender: newAdmin.gender || null,
-          },
-        },
+      // Create the admin user account using secondary Firebase Auth setup
+      let userId = '';
+      const secondaryApp = initializeApp(app.options, 'secondaryAdminApp');
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      try {
+        const userCredential = await createUserWithEmailAndPassword(
+          secondaryAuth,
+          newAdmin.email.trim().toLowerCase(),
+          newAdmin.password
+        );
+        userId = userCredential.user.uid;
+        await secondaryAuth.signOut();
+      } catch (error: any) {
+        throw new Error(error.message || 'Failed to create admin auth account');
+      } finally {
+        await deleteApp(secondaryApp);
+      }
+
+      // Write admin user document to Firestore
+      await setDoc(doc(db, 'users', userId), {
+        id: userId,
+        email: newAdmin.email.trim().toLowerCase(),
+        first_name: newAdmin.firstName,
+        last_name: newAdmin.lastName,
+        other_name: newAdmin.otherName || null,
+        full_name: `${newAdmin.firstName} ${newAdmin.lastName}`.trim(),
+        phone: newAdmin.phone,
+        gender: newAdmin.gender || null,
+        role: 'admin',
+        status: 'active',
+        created_at: new Date().toISOString(),
       });
-
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('Failed to create user');
-
-      // Set user role to admin
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .update({ role: 'admin' })
-        .eq('user_id', authData.user.id);
-
-      if (roleError) throw roleError;
-
-      // Explicitly update profile correctly
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          first_name: newAdmin.firstName,
-          last_name: newAdmin.lastName,
-          other_name: newAdmin.otherName || null,
-          phone: newAdmin.phone,
-          gender: newAdmin.gender || null,
-          full_name: `${newAdmin.firstName} ${newAdmin.lastName}`.trim(),
-        })
-        .eq('id', authData.user.id);
-        
-      if (profileError) throw profileError;
 
       toast({
         title: "Success",
         description: "Admin account created successfully"
       });
 
-      // Delay fetch to allow Supabase trigger to complete
-      setTimeout(async () => {
-        // Refresh admin list
-        const { data: adminRoles } = await supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'admin');
-
-        if (adminRoles && adminRoles.length > 0) {
-          const adminUserIds = adminRoles.map(r => r.user_id);
-          const { data: profiles } = await supabase
-            .from('profiles')
-            .select('id, first_name, last_name, other_name, full_name, email, phone')
-            .in('id', adminUserIds);
-
-          setAdminUsers(profiles || []);
-        }
-      }, 1500);
+      // Refresh admin list
+      await fetchAdmins();
 
       // Reset form
       setNewAdmin({
@@ -1676,26 +1631,8 @@ const AdminDashboard = () => {
     }
 
     try {
-      // Delete user role
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', userId);
-
-      if (roleError) throw roleError;
-
-      // If doctor, also delete from doctors table
-      if (userType === 'doctor') {
-        const { error: doctorError } = await supabase
-          .from('doctors')
-          .delete()
-          .eq('user_id', userId);
-
-        if (doctorError) throw doctorError;
-      }
-
-      // Note: We don't delete from profiles or auth.users to maintain data integrity
-      // The user just won't have a role anymore
+      // Delete Firestore user document
+      await deleteDoc(doc(db, 'users', userId));
 
       toast({
         title: "Success",
@@ -1704,42 +1641,11 @@ const AdminDashboard = () => {
 
       // Refresh the appropriate list
       if (userType === 'admin') {
-        const { data: adminRoles } = await supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'admin');
-
-        if (adminRoles && adminRoles.length > 0) {
-          const adminUserIds = adminRoles.map(r => r.user_id);
-          const { data: profiles } = await supabase
-            .from('profiles')
-            .select('id, first_name, last_name, other_name, full_name, email, phone, gender')
-            .in('id', adminUserIds);
-
-          setAdminUsers(profiles || []);
-        } else {
-          setAdminUsers([]);
-        }
+        await fetchAdmins();
       } else if (userType === 'doctor') {
         fetchDoctors();
       } else if (userType === 'patient') {
-        const { data: patientRoles } = await supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'patient');
-
-        if (patientRoles && patientRoles.length > 0) {
-          const patientUserIds = patientRoles.map(r => r.user_id);
-          const { data: profiles } = await supabase
-            .from('profiles')
-            .select('id, first_name, last_name, other_name, full_name, email, phone, gender, date_of_birth, hospital_card_id, created_at')
-            .in('id', patientUserIds)
-            .order('created_at', { ascending: false });
-
-          setPatientUsers(profiles || []);
-        } else {
-          setPatientUsers([]);
-        }
+        await fetchPatients();
       }
     } catch (error: any) {
       console.error(`Error deleting ${userType}:`, error);
@@ -1757,12 +1663,10 @@ const AdminDashboard = () => {
 
     setUpdatingPatient(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ hospital_card_id: hospitalCardId.trim() || null })
-        .eq('id', selectedPatient.id);
-
-      if (error) throw error;
+      // Update in Firestore
+      await updateDoc(doc(db, 'users', selectedPatient.id), {
+        hospital_card_id: hospitalCardId.trim() || null
+      });
 
       toast({
         title: "Success",
@@ -1770,21 +1674,7 @@ const AdminDashboard = () => {
       });
 
       // Refresh patient list
-      const { data: patientRoles } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role', 'patient');
-
-      if (patientRoles && patientRoles.length > 0) {
-        const patientUserIds = patientRoles.map(r => r.user_id);
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, other_name, full_name, email, phone, gender, date_of_birth, hospital_card_id, created_at')
-          .in('id', patientUserIds)
-          .order('created_at', { ascending: false });
-
-        setPatientUsers(profiles || []);
-      }
+      await fetchPatients();
 
       setEditPatientOpen(false);
       setSelectedPatient(null);

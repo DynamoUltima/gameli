@@ -4,6 +4,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { supabase } from '@/integrations/supabase/client';
+import { app, db } from '@/integrations/firebase/client';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
@@ -96,34 +100,38 @@ export const AddDoctorDialog = ({
       let userId = existingProfile?.id;
 
       if (!userId) {
-        // Save admin session to restore after signup
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-
-        // Create the user account via standard signup
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: values.email,
-          password: values.password,
-          options: {
-            data: {
-              first_name: values.first_name,
-              last_name: values.last_name,
-              other_name: values.other_name || '',
-              phone: values.phone,
-              gender: values.gender || null,
-            },
-          },
-        });
-
-        if (authError) throw authError;
-        if (!authData.user) throw new Error('Failed to create user');
+        // Create user via secondary Firebase app to prevent signing out admin
+        const secondaryApp = initializeApp(app.options, 'secondaryAdminApp');
+        const secondaryAuth = getAuth(secondaryApp);
         
-        userId = authData.user.id;
+        try {
+          const userCredential = await createUserWithEmailAndPassword(
+            secondaryAuth,
+            values.email.trim().toLowerCase(),
+            values.password
+          );
+          userId = userCredential.user.uid;
+          await secondaryAuth.signOut();
+        } catch (error: any) {
+          throw new Error(error.message || 'Failed to create doctor auth account');
+        } finally {
+          await deleteApp(secondaryApp);
+        }
 
-        // Restore admin session immediately so RLS policies pass for subsequent inserts
-        if (currentSession) {
-          await supabase.auth.setSession({
-            access_token: currentSession.access_token,
-            refresh_token: currentSession.refresh_token,
+        // Create new users document
+        if (userId) {
+          await setDoc(doc(db, 'users', userId), {
+            id: userId,
+            email: values.email.trim().toLowerCase(),
+            first_name: values.first_name,
+            last_name: values.last_name,
+            other_name: values.other_name || null,
+            phone: values.phone,
+            gender: values.gender || null,
+            full_name: `${values.first_name} ${values.last_name}`.trim(),
+            role: 'doctor',
+            status: 'active',
+            created_at: new Date().toISOString(),
           });
         }
       } else {
@@ -196,6 +204,8 @@ export const AddDoctorDialog = ({
         user_id: userId,
         years_of_experience: 0,
         available: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }).select('id').single();
 
 

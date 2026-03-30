@@ -17,7 +17,7 @@ export default function Index() {
   const [activeCampaign, setActiveCampaign] = useState<any>(null);
 
   const { user } = useAuth();
-  const { role } = useUserRole(user?.id);
+  const { role } = useUserRole(user?.uid);
   const navigate = useNavigate();
 
   // Fetch active campaign

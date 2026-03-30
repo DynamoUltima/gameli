@@ -21,6 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format, parse, addMinutes, isBefore, isSameDay, startOfDay } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { usePaystackPayment } from "react-paystack";
 
 interface PatientBookingModalProps {
     isOpen: boolean;
@@ -37,14 +38,28 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
     const totalSteps = 5;
 
     const nameParts = (patientName || "").trim().split(/\s+/);
-    const firstName = nameParts[0] || "";
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+    const initialFirstName = nameParts[0] || "";
+    const initialLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+
+    // Controlled state for personal info fields — pre-populated from props
+    const [firstName, setFirstName] = useState(initialFirstName);
+    const [lastName, setLastName] = useState(initialLastName);
+    const [personalPhone, setPersonalPhone] = useState(patientPhone || "");
+    const [personalEmail, setPersonalEmail] = useState(patientEmail || "");
 
     const [clinic, setClinic] = useState("");
     const [consultationFor, setConsultationFor] = useState("");
     const [patientGender, setPatientGender] = useState("");
     const [partnerEmail, setPartnerEmail] = useState("");
     const [paymentMethod, setPaymentMethod] = useState("mobile");
+
+    // Extra personal info fields
+    const [secondaryPhone, setSecondaryPhone] = useState("");
+    const [homeAddress, setHomeAddress] = useState("");
+    const [isBookingForOther, setIsBookingForOther] = useState(false);
+    const [otherPatientName, setOtherPatientName] = useState("");
+    const [otherPatientPhone, setOtherPatientPhone] = useState("");
+    const [relationship, setRelationship] = useState("");
 
     const [preferredDoctor, setPreferredDoctor] = useState("");
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
@@ -66,6 +81,25 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
         (doc.specialty_id === clinic || doc.specialties?.some(s => s.id === clinic)) && doc.available
     );
     const isFertility = selectedSpecialty?.name?.toLowerCase().includes('fertility');
+
+    const paystackConfig = {
+        reference: (new Date()).getTime().toString(),
+        email: patientEmail || user?.email || "patient@example.com",
+        amount: amountToPay * 100, // Amount in pesewas
+        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || "",
+        currency: "GHS",
+    };
+
+    const initializePayment = usePaystackPayment(paystackConfig);
+
+    // When props update (e.g., dashboard finishes loading), sync into state
+    useEffect(() => {
+        const parts = (patientName || "").trim().split(/\s+/);
+        setFirstName(parts[0] || "");
+        setLastName(parts.length > 1 ? parts.slice(1).join(" ") : "");
+        setPersonalPhone(patientPhone || "");
+        setPersonalEmail(patientEmail || "");
+    }, [patientName, patientPhone, patientEmail]);
 
     useEffect(() => {
         const fetchAvailability = async () => {
@@ -124,6 +158,131 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedDate, preferredDoctor, getAvailableSlots]);
 
+    const processBookingSuccess = async (paymentReference?: any) => {
+        setIsSubmitting(true);
+        try {
+            let scheduledAt: string | null = null;
+            if (selectedDate && selectedTime) {
+                // Parse "09:00 AM" and combine with selectedDate
+                const [timeStr, modifier] = selectedTime.split(' ');
+                let [hours, minutes] = timeStr.split(':').map(Number);
+                if (modifier === 'PM' && hours < 12) hours += 12;
+                if (modifier === 'AM' && hours === 12) hours = 0;
+                
+                const dateObj = new Date(selectedDate);
+                dateObj.setHours(hours, minutes, 0, 0);
+                scheduledAt = dateObj.toISOString();
+            }
+            
+            const { data: appt, error: apptErr } = await supabase
+                .from('appointments' as any)
+                .insert({
+                    patient_id: (user as any)?.uid || (user as any)?.id,
+                    doctor_id: preferredDoctor,
+                    clinic: (specialties.find(s => s.id === clinic)?.name) || null,
+                    specialty_id: clinic || null,
+                    type: bookingType,
+                    scheduled_at: scheduledAt ?? new Date().toISOString(),
+                    symptoms: "Online consultation booking", // Default symptom or text from form if available
+                    status: "confirmed",
+                    payment_status: paymentReference ? "paid" : "pending"
+                })
+                .select('id, doctor_id, scheduled_at')
+                .maybeSingle();
+                
+            if (apptErr) throw apptErr;
+
+            // Send appointment confirmation email to patient
+            const selectedDoc = doctors.find(d => d.user_id === preferredDoctor);
+            const dateStr = selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '';
+            
+            const notificationData = {
+                patientEmail: personalEmail || patientEmail,
+                patientPhone: isBookingForOther ? otherPatientPhone : (personalPhone || patientPhone),
+                patientName: isBookingForOther ? otherPatientName : (`${firstName} ${lastName}`.trim() || patientName),
+                bookerName: isBookingForOther ? `${firstName} ${lastName}`.trim() : undefined,
+                bookerPhone: isBookingForOther ? personalPhone : undefined,
+                relationship: isBookingForOther ? relationship : undefined,
+                secondaryPhone: secondaryPhone || undefined,
+                homeAddress: bookingType === 'home' ? homeAddress : undefined,
+                doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
+                specialty: selectedSpecialty?.name || '',
+                date: dateStr,
+                time: selectedTime,
+                type: bookingType,
+                amount: amountToPay.toString(),
+            };
+
+            sendEmail('appointment_confirmation', notificationData);
+            sendSms('appointment_confirmation', notificationData);
+
+            if (paymentReference) {
+                // Send payment receipt if payment was processed
+                sendEmail('payment_receipt', notificationData);
+                sendSms('payment_receipt', notificationData);
+            }
+
+            // Send notification email to the doctor
+            if (selectedDoc?.profiles?.email) {
+                const doctorNotification = {
+                    doctorEmail: selectedDoc.profiles.email,
+                    doctorPhone: selectedDoc.profiles.phone || '', // Assuming phone exists or is empty
+                    doctorName: selectedDoc.profiles.full_name,
+                    ...notificationData
+                };
+                sendEmail('doctor_booking_notification', doctorNotification);
+                sendSms('doctor_booking_notification', doctorNotification);
+            }
+            
+            if (isFertility && appt) {
+                const formType = consultationFor === 'couple' ? 
+                    (patientGender === 'female' ? 'female_fertility' : 'male_fertility') : 
+                    (patientGender === 'female' ? 'female_fertility' : 'male_fertility');
+                const partnerFormType = patientGender === 'female' ? 'male_fertility' : 'female_fertility';
+                
+                const { error: formErr } = await supabase
+                    .from('medical_forms' as any)
+                    .insert({
+                        appointment_id: (appt as any).id,
+                        patient_id: (user as any)?.uid || (user as any)?.id,
+                        form_type: formType,
+                        status: 'pending'
+                    });
+                    
+                if (formErr) {
+                    console.error("Failed to create medical form:", formErr);
+                }
+
+                if (consultationFor === 'couple' && partnerEmail) {
+                    sendEmail('partner_fertility_form', {
+                        partnerEmail,
+                        formType: partnerFormType,
+                        date: dateStr,
+                    });
+                    toast({
+                        title: "Email Sent",
+                        description: `A secure link to the partner's form has been sent to ${partnerEmail}`,
+                    });
+                }
+            }
+            
+            if (currentStep < totalSteps) {
+                setCurrentStep(curr => curr + 1);
+                // Trigger dashboard re-fetch so the new appointment
+                // appears instantly in the upcoming appointments box.
+                onBookingSuccess?.();
+            }
+        } catch (error: any) {
+            toast({
+                title: "Booking Failed",
+                description: error.message || "An error occurred while booking.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     const handleNextClick = async () => {
         if (currentStep === 1) {
             const form = document.getElementById('personalForm') as HTMLFormElement;
@@ -146,119 +305,17 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
             
             if (!isSubmitting) {
                 setIsSubmitting(true);
-                try {
-                    let scheduledAt: string | null = null;
-                    if (selectedDate && selectedTime) {
-                        // Parse "09:00 AM" and combine with selectedDate
-                        const [timeStr, modifier] = selectedTime.split(' ');
-                        let [hours, minutes] = timeStr.split(':').map(Number);
-                        if (modifier === 'PM' && hours < 12) hours += 12;
-                        if (modifier === 'AM' && hours === 12) hours = 0;
-                        
-                        const dateObj = new Date(selectedDate);
-                        dateObj.setHours(hours, minutes, 0, 0);
-                        scheduledAt = dateObj.toISOString();
-                    }
-                    
-                    const { data: appt, error: apptErr } = await supabase
-                        .from('appointments' as any)
-                        .insert({
-                            patient_id: user?.id,
-                            doctor_id: preferredDoctor,
-                            clinic: (specialties.find(s => s.id === clinic)?.name) || null,
-                            specialty_id: clinic || null,
-                            type: bookingType,
-                            scheduled_at: scheduledAt ?? new Date().toISOString(),
-                            symptoms: "Online consultation booking", // Default symptom or text from form if available
-                            status: "confirmed",
-                            payment_status: "paid" // Assuming successfully paid in mockup
-                        })
-                        .select('id, doctor_id, scheduled_at')
-                        .maybeSingle();
-                        
-                    if (apptErr) throw apptErr;
-
-                    // Send appointment confirmation email to patient
-                    const selectedDoc = doctors.find(d => d.user_id === preferredDoctor);
-                    const dateStr = selectedDate ? format(selectedDate, 'MMMM do, yyyy') : '';
-                    
-                    const notificationData = {
-                        patientEmail: patientEmail,
-                        patientPhone: patientPhone,
-                        patientName: patientName,
-                        doctorName: selectedDoc?.profiles?.full_name || 'Your Doctor',
-                        specialty: selectedSpecialty?.name || '',
-                        date: dateStr,
-                        time: selectedTime,
-                        type: bookingType,
-                        amount: bookingType === "online" ? "150.00" : "200.00",
-                    };
-
-                    sendEmail('appointment_confirmation', notificationData);
-                    sendSms('appointment_confirmation', notificationData);
-
-                    // Send payment receipt
-                    sendEmail('payment_receipt', notificationData);
-                    sendSms('payment_receipt', notificationData);
-
-                    // Send notification email to the doctor
-                    if (selectedDoc?.profiles?.email) {
-                        const doctorNotification = {
-                            doctorEmail: selectedDoc.profiles.email,
-                            doctorPhone: selectedDoc.profiles.phone || '', // Assuming phone exists or is empty
-                            doctorName: selectedDoc.profiles.full_name,
-                            ...notificationData
-                        };
-                        sendEmail('doctor_booking_notification', doctorNotification);
-                        sendSms('doctor_booking_notification', doctorNotification);
-                    }
-                    
-                    if (isFertility && appt) {
-                        const formType = consultationFor === 'couple' ? 
-                            (patientGender === 'female' ? 'female_fertility' : 'male_fertility') : 
-                            (patientGender === 'female' ? 'female_fertility' : 'male_fertility');
-                        const partnerFormType = patientGender === 'female' ? 'male_fertility' : 'female_fertility';
-                        
-                        const { error: formErr } = await supabase
-                            .from('medical_forms' as any)
-                            .insert({
-                                appointment_id: (appt as any).id,
-                                patient_id: user?.id,
-                                form_type: formType,
-                                status: 'pending'
-                            });
-                            
-                        if (formErr) {
-                            console.error("Failed to create medical form:", formErr);
+                if (amountToPay > 0) {
+                    initializePayment({
+                        onSuccess: (reference) => {
+                            processBookingSuccess(reference);
+                        },
+                        onClose: () => {
+                            setIsSubmitting(false);
                         }
-
-                        if (consultationFor === 'couple' && partnerEmail) {
-                            sendEmail('partner_fertility_form', {
-                                partnerEmail,
-                                formType: partnerFormType,
-                                date: dateStr,
-                            });
-                            toast({
-                                title: "Email Sent",
-                                description: `A secure link to the partner's form has been sent to ${partnerEmail}`,
-                            });
-                        }
-                    }
-                    
-                    if (currentStep < totalSteps) {
-                        setCurrentStep(curr => curr + 1);
-                        // Trigger dashboard re-fetch so the new appointment
-                        // appears instantly in the upcoming appointments box.
-                        onBookingSuccess?.();
-                    }
-                } catch (error: any) {
-                    toast({
-                        title: "Booking Failed",
-                        description: error.message || "An error occurred while booking.",
-                        variant: "destructive",
                     });
-                } finally {
-                    setIsSubmitting(false);
+                } else {
+                    processBookingSuccess();
                 }
             }
             return;
@@ -285,6 +342,12 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
             setPreferredDoctor("");
             setSelectedDate(undefined);
             setSelectedTime('');
+            setSecondaryPhone("");
+            setHomeAddress("");
+            setIsBookingForOther(false);
+            setOtherPatientName("");
+            setOtherPatientPhone("");
+            setRelationship("");
         }, 300);
     };
 
@@ -378,24 +441,165 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                             </div>
 
                             <form id="personalForm" className="space-y-5" onSubmit={(e) => { e.preventDefault(); handleNextClick(); }}>
+                                {/* Booker's name */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">First Name</label>
-                                        <input type="text" required defaultValue={firstName || "James"} className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm" />
+                                        <input
+                                            type="text"
+                                            required
+                                            value={firstName}
+                                            onChange={(e) => setFirstName(e.target.value)}
+                                            placeholder="Enter first name"
+                                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                        />
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Last Name</label>
-                                        <input type="text" required defaultValue={lastName || "Bond"} className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm" />
+                                        <input
+                                            type="text"
+                                            required
+                                            value={lastName}
+                                            onChange={(e) => setLastName(e.target.value)}
+                                            placeholder="Enter last name"
+                                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                        />
                                     </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Phone Number</label>
-                                    <input type="tel" required defaultValue={patientPhone || "+1 234 567 8900"} className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm" />
+
+                                {/* Phone numbers */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Primary Phone <span className="text-red-500">*</span></label>
+                                        <input
+                                            type="tel"
+                                            required
+                                            value={personalPhone}
+                                            onChange={(e) => setPersonalPhone(e.target.value)}
+                                            placeholder="e.g. 024XXXXXXX"
+                                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Secondary Phone <span className="text-slate-400 font-normal">(optional)</span></label>
+                                        <input
+                                            type="tel"
+                                            value={secondaryPhone}
+                                            onChange={(e) => setSecondaryPhone(e.target.value)}
+                                            placeholder="e.g. 054XXXXXXX"
+                                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                        />
+                                    </div>
                                 </div>
+
+                                {/* Email */}
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Email Address</label>
-                                    <input type="email" required defaultValue={patientEmail || "james@example.com"} className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm" />
+                                    <input
+                                        type="email"
+                                        required
+                                        value={personalEmail}
+                                        onChange={(e) => setPersonalEmail(e.target.value)}
+                                        placeholder="Enter email address"
+                                        className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                    />
                                 </div>
+
+                                {/* Home address — only for home visits */}
+                                {bookingType === 'home' && (
+                                    <div className="space-y-2 animate-fade-in">
+                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">
+                                            Home / GPS Address <span className="text-red-500">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            required={bookingType === 'home'}
+                                            value={homeAddress}
+                                            onChange={(e) => setHomeAddress(e.target.value)}
+                                            placeholder="e.g. GH-123-4567 or 12 Accra Road, East Legon"
+                                            className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                        />
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Enter your Ghana Post GPS code or full street address for the doctor's visit.</p>
+                                    </div>
+                                )}
+
+                                {/* Booking for someone else toggle */}
+                                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                                    <label className="flex items-center gap-3 cursor-pointer select-none group">
+                                        <div
+                                            onClick={() => setIsBookingForOther(v => !v)}
+                                            className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${
+                                                isBookingForOther
+                                                    ? 'bg-slate-900 dark:bg-white'
+                                                    : 'bg-slate-200 dark:bg-slate-700'
+                                            }`}
+                                        >
+                                            <span className={`absolute top-1 left-1 w-4 h-4 bg-white dark:bg-slate-900 rounded-full shadow transition-transform duration-200 ${
+                                                isBookingForOther ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                        </div>
+                                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                            I am booking on behalf of someone else
+                                        </span>
+                                    </label>
+                                </div>
+
+                                {/* Fields shown if booking for someone else */}
+                                {isBookingForOther && (
+                                    <div className="space-y-5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 animate-fade-in">
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">Patient Details</p>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                            <div className="space-y-2 sm:col-span-2">
+                                                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Patient's Full Name <span className="text-red-500">*</span></label>
+                                                <input
+                                                    type="text"
+                                                    required={isBookingForOther}
+                                                    value={otherPatientName}
+                                                    onChange={(e) => setOtherPatientName(e.target.value)}
+                                                    placeholder="Patient's full name"
+                                                    className="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Patient's Phone Number <span className="text-red-500">*</span></label>
+                                                <input
+                                                    type="tel"
+                                                    required={isBookingForOther}
+                                                    value={otherPatientPhone}
+                                                    onChange={(e) => setOtherPatientPhone(e.target.value)}
+                                                    placeholder="e.g. 024XXXXXXX"
+                                                    className="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all text-sm"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Your Relationship to Patient <span className="text-red-500">*</span></label>
+                                                <div className="relative">
+                                                    <select
+                                                        required={isBookingForOther}
+                                                        value={relationship}
+                                                        onChange={(e) => setRelationship(e.target.value)}
+                                                        className="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 focus:ring-1 focus:ring-slate-900 dark:focus:ring-slate-400 transition-all appearance-none text-sm"
+                                                    >
+                                                        <option value="" disabled>Select relationship...</option>
+                                                        <option value="spouse">Spouse / Partner</option>
+                                                        <option value="parent">Parent</option>
+                                                        <option value="child">Child</option>
+                                                        <option value="sibling">Sibling</option>
+                                                        <option value="guardian">Guardian / Caregiver</option>
+                                                        <option value="friend">Friend</option>
+                                                        <option value="colleague">Colleague</option>
+                                                        <option value="other">Other</option>
+                                                    </select>
+                                                    <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-slate-400">
+                                                        <ChevronDown className="w-4 h-4" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <button type="submit" className="hidden"></button>
                             </form>
                         </div>

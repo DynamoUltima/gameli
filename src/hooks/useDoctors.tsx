@@ -36,12 +36,21 @@ export const useDoctors = () => {
 
   const fetchDoctors = async () => {
     try {
-      const { data: doctorsData, error } = await supabase
+      // Pre-fetch specialties since the Firebase shim doesn't support relation joins natively
+      const { data: allSpecs } = await supabase.from('specialties').select('*');
+      const specialtiesMap = new Map((allSpecs || []).map((s: any) => [s.id, s]));
+
+      const { data: rawDoctorsData, error } = await supabase
         .from('doctors')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
 
       if (error) throw error;
+      
+      const doctorsData = Array.isArray(rawDoctorsData) ? rawDoctorsData.sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA;
+      }) : [];
 
       // Fetch profiles separately for each doctor
       const doctorsWithProfiles = await Promise.all(
@@ -56,11 +65,11 @@ export const useDoctors = () => {
 
           const { data: doctorSpecialtiesData } = await supabase
             .from('doctor_specialties')
-            .select('*, specialties(*)')
+            .select('*')
             .eq('doctor_id', doctor.id);
 
           const specialtyData = doctorSpecialtiesData
-            ?.map((ds: any) => ds.specialties)
+            ?.map((ds: any) => specialtiesMap.get(ds.specialty_id) || ds.specialties)
             .filter(Boolean) || [];
 
           return {

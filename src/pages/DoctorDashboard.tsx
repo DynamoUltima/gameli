@@ -6,7 +6,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList } from "lucide-react";
+import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList, Download } from "lucide-react";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -176,13 +178,13 @@ const DoctorDashboard = () => {
 
   useEffect(() => {
     const loadDoctor = async () => {
-      if (!user?.id) return;
+      if (!user?.uid) return;
 
       // Fetch profile
       const { data: profile } = await supabase
         .from("profiles")
         .select("full_name")
-        .eq("id", user.id)
+        .eq("id", user.uid)
         .maybeSingle();
 
       setFullName(profile?.full_name ?? "");
@@ -198,7 +200,7 @@ const DoctorDashboard = () => {
             )
           )
         `)
-        .eq("user_id", user.id)
+        .eq("user_id", user.uid)
         .maybeSingle();
 
       if (doctor?.doctor_specialties && doctor.doctor_specialties.length > 0) {
@@ -210,26 +212,26 @@ const DoctorDashboard = () => {
     };
 
     loadDoctor();
-  }, [user?.id]);
+  }, [user?.uid]);
 
   // Fetch all appointments for calendar view
   useEffect(() => {
     const loadAllAppointments = async () => {
-      if (!user?.id) return;
+      if (!user?.uid) return;
 
       // Get doctor record
       const { data: doctorData } = await supabase
         .from("doctors")
         .select("id")
-        .eq("user_id", user.id)
+        .eq("user_id", user.uid)
         .maybeSingle();
 
       if (!doctorData) {
-        console.log('No doctor record found for user:', user.id);
+        console.log('No doctor record found for user:', user.uid);
         return;
       }
 
-      console.log('Fetching appointments for doctor user_id:', user.id);
+      console.log('Fetching appointments for doctor user_id:', user.uid);
 
       // Fetch ALL appointments for this doctor (no date filter, no status filter)
       // This ensures appointments show up in the calendar regardless of which month is viewed
@@ -251,7 +253,7 @@ const DoctorDashboard = () => {
             created_at
           )
         `)
-        .eq('doctor_id', user.id)
+        .eq('doctor_id', user.uid)
         // No status filter - include ALL statuses (pending, confirmed, completed, cancelled)
         // No date filter - include ALL dates so calendar works for any month
         .order('scheduled_at', { ascending: true });
@@ -345,16 +347,16 @@ const DoctorDashboard = () => {
     };
 
     loadAllAppointments();
-  }, [user?.id, currentMonth]);
+  }, [user?.uid, currentMonth]);
 
   // Fetch availability slots
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
     const fetchAvailability = async () => {
       const { data, error } = await supabase
         .from('doctor_availability')
         .select('*')
-        .eq('doctor_id', user.id);
+        .eq('doctor_id', user.uid);
       
       if (error) {
         console.error('Error fetching availability:', error);
@@ -363,10 +365,10 @@ const DoctorDashboard = () => {
       }
     };
     fetchAvailability();
-  }, [user?.id]);
+  }, [user?.uid]);
 
   const handleAddSlot = async () => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
     setIsAddingSlot(true);
     
     // Check if end_time is after start_time
@@ -387,7 +389,7 @@ const DoctorDashboard = () => {
     
     if (recurrence === "specific") {
       inserts.push({
-        doctor_id: user.id,
+        doctor_id: user.uid,
         day_of_week: selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
         date: getDateString(selectedDate),
         start_time: startStr,
@@ -404,7 +406,7 @@ const DoctorDashboard = () => {
         const currentDate = new Date(startOfWeek);
         currentDate.setDate(startOfWeek.getDate() + i);
         inserts.push({
-          doctor_id: user.id,
+          doctor_id: user.uid,
           day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
           date: getDateString(currentDate),
           start_time: startStr,
@@ -420,7 +422,7 @@ const DoctorDashboard = () => {
         const currentDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
         if (currentDate.getDay() === targetDay) {
           inserts.push({
-            doctor_id: user.id,
+            doctor_id: user.uid,
             day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
             date: getDateString(currentDate),
             start_time: startStr,
@@ -434,7 +436,7 @@ const DoctorDashboard = () => {
       for (let i = 1; i <= daysInMonth; i++) {
         const currentDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
         inserts.push({
-          doctor_id: user.id,
+          doctor_id: user.uid,
           day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
           date: getDateString(currentDate),
           start_time: startStr,
@@ -571,6 +573,117 @@ const DoctorDashboard = () => {
     setIsSavingNoteId(null);
   };
 
+  // Download all clinical notes for a patient as a branded PDF
+  const downloadNotesPDF = () => {
+    const selectedProfile = patientHistory.find(p => p.patient_id === selectedPatient)?.profiles;
+    const patientName = selectedProfile?.full_name || 'Unknown Patient';
+    const patientPhone = selectedProfile?.phone || 'N/A';
+    const profileAppointments = allAppointments
+      .filter(apt => apt.patient_id === selectedPatient)
+      .sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
+
+    const doc = new jsPDF();
+    const pageW = doc.internal.pageSize.getWidth();
+
+    // ── Header band ─────────────────────────────────────────────────────────
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.rect(0, 0, pageW, 38, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Gameliel Hospital', 14, 16);
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184); // slate-400
+    doc.text('Clinical Notes Report', 14, 24);
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}`, 14, 31);
+
+    // ── Patient info ────────────────────────────────────────────────────────
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Patient Information', 14, 52);
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105); // slate-600
+    doc.text(`Name: ${patientName}`, 14, 61);
+    doc.text(`Phone: ${patientPhone}`, 14, 68);
+    doc.text(`Attending Physician: Dr. ${fullName || 'N/A'}`, 14, 75);
+    if (specialtyName) doc.text(`Specialty: ${specialtyName}`, 14, 82);
+
+    // Divider
+    doc.setDrawColor(226, 232, 240);
+    doc.line(14, 88, pageW - 14, 88);
+
+    // ── Notes table ─────────────────────────────────────────────────────────
+    const tableRows = profileAppointments.map((apt, idx) => {
+      const visitType = apt.type === 'online' ? 'Online' : apt.type === 'home' ? 'Home Visit' : 'Hospital';
+      const date = new Date(apt.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const time = new Date(apt.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      const status = (apt.status || '').charAt(0).toUpperCase() + (apt.status || '').slice(1);
+      const noteText = editingNotes[apt.id] !== undefined ? editingNotes[apt.id] : (apt.notes || '');
+      const symptoms = apt.symptoms || '';
+      return [
+        `${idx + 1}`,
+        `${date}\n${time}`,
+        visitType,
+        status,
+        symptoms || '—',
+        noteText || 'No notes recorded'
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 94,
+      head: [['#', 'Date & Time', 'Visit Type', 'Status', 'Symptoms', 'Clinical Notes']],
+      body: tableRows,
+      styles: {
+        fontSize: 9,
+        cellPadding: { top: 6, right: 5, bottom: 6, left: 5 },
+        valign: 'top',
+        overflow: 'linebreak',
+        lineColor: [226, 232, 240],
+        lineWidth: 0.3,
+      },
+      headStyles: {
+        fillColor: [15, 23, 42],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 28 },
+        2: { cellWidth: 22 },
+        3: { cellWidth: 22 },
+        4: { cellWidth: 35 },
+        5: { cellWidth: 'auto' },
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    // ── Footer ───────────────────────────────────────────────────────────────
+    const totalPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      const footerY = doc.internal.pageSize.getHeight() - 10;
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Gameliel Hospital — Confidential Medical Record', 14, footerY);
+      doc.text(`Page ${i} of ${totalPages}`, pageW - 14, footerY, { align: 'right' });
+    }
+
+    const safeName = patientName.replace(/\s+/g, '_');
+    doc.save(`Clinical_Notes_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
+
   // Compute unique patients for the history table
   const patientHistory = useMemo(() => {
     const uniqueMap = new Map();
@@ -605,19 +718,28 @@ const DoctorDashboard = () => {
   // Fetch recent activities/notifications
   useEffect(() => {
     const fetchNotifications = async () => {
-      if (!user?.id) return;
+      if (!user?.uid) return;
 
       try {
         // Get appointments from the last 7 days
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-        const { data: recentAppointments, error } = await supabase
+        // NOTE: We do NOT filter by created_at in the Firestore query because
+        // older appointments may not have the created_at field stored, which
+        // would cause Firestore to silently exclude them. We filter in JS instead.
+        const { data: allDoctorAppts, error } = await supabase
           .from('appointments')
           .select('*')
-          .eq('doctor_id', user.id)
-          .gte('created_at', sevenDaysAgo.toISOString())
+          .eq('doctor_id', user.uid)
           .order('created_at', { ascending: false });
+
+        // Filter in JS: include appointments created in the last 7 days,
+        // OR those missing created_at (treat them as recent to be safe)
+        const recentAppointments = (allDoctorAppts || []).filter((apt: any) => {
+          if (!apt.created_at) return true; // include if no created_at
+          return new Date(apt.created_at) >= sevenDaysAgo;
+        });
 
         if (error) throw error;
 
@@ -687,7 +809,7 @@ const DoctorDashboard = () => {
     };
 
     fetchNotifications();
-  }, [user?.id]);
+  }, [user?.uid]);
 
   // Format relative time for notifications
   const formatRelativeTime = (timestamp: string) => {
@@ -1877,9 +1999,22 @@ const DoctorDashboard = () => {
 
                   <div className="xl:col-span-2 flex flex-col gap-6">
                     <Card className="p-6 bg-card/80 backdrop-blur-sm border-border/50">
-                      <h2 className="text-xl font-semibold tracking-tight text-foreground mb-8">
-                        Clinical Notes History
-                      </h2>
+                      <div className="flex items-center justify-between mb-8">
+                        <h2 className="text-xl font-semibold tracking-tight text-foreground">
+                          Clinical Notes History
+                        </h2>
+                        {profileAppointments.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2 text-sm"
+                            onClick={downloadNotesPDF}
+                          >
+                            <Download className="w-4 h-4" />
+                            Download PDF
+                          </Button>
+                        )}
+                      </div>
 
                       <div className="space-y-0">
                         {profileAppointments.length === 0 ? (

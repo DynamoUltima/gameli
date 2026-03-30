@@ -26,6 +26,7 @@ class QueryBuilder {
   isVirtualTable: boolean;
   filters: any[];
   modifiers: any[];
+  orderFields: { field: string; dir: 'asc' | 'desc' }[];
   isSingle: boolean;
   isCount: boolean;
   limitCount: number | null;
@@ -39,6 +40,7 @@ class QueryBuilder {
     this.isVirtualTable = tableName === 'user_roles';
     this.filters = [];
     this.modifiers = [];
+    this.orderFields = [];
     this.isSingle = false;
     this.isCount = false;
     this.limitCount = null;
@@ -46,7 +48,9 @@ class QueryBuilder {
   }
 
   select(_fields?: string) {
-    this.operation = 'select';
+    if (!this.operation) {
+      this.operation = 'select';
+    }
     return this;
   }
 
@@ -108,7 +112,9 @@ class QueryBuilder {
   }
 
   order(field: string, options?: { ascending?: boolean }) {
-    this.modifiers.push(orderBy(field, options?.ascending === false ? 'desc' : 'asc'));
+    const dir = options?.ascending === false ? 'desc' : 'asc';
+    this.modifiers.push(orderBy(field, dir));
+    this.orderFields.push({ field, dir });
     return this;
   }
 
@@ -150,10 +156,12 @@ class QueryBuilder {
         });
       }
 
-      // Handle direct doc fetch by ID when we have a single eq('id', ...) filter
+      // Detect eq('id', ...) filter — 'id' is the Firestore document ID, not a
+      // stored field, so we must use direct doc references instead of a query.
       const idFilter = this.filters.find(
         (f) => f._field?.segments?.[0] === 'id' && f._value !== undefined
       );
+      const directDocId: string | null = idFilter?._value ?? null;
 
       let data: any[] = [];
 
@@ -161,11 +169,44 @@ class QueryBuilder {
       const hasEmptyPlaceholder = this.filters.some(
         (f) => Array.isArray(f._value) && f._value.includes('__EMPTY_PLACEHOLDER__')
       );
+
       if (hasEmptyPlaceholder) {
         data = [];
+      } else if (directDocId && (this.operation === 'update' || this.operation === 'delete' || this.isSingle || !this.operation)) {
+        // Fast path: direct doc reference by Firestore document ID
+        if (this.operation === 'update') {
+          await updateDoc(doc(db, this.firestoreTable, directDocId), this.updateData);
+          return resolve({ error: null, data: null });
+        }
+        if (this.operation === 'delete') {
+          await deleteDoc(doc(db, this.firestoreTable, directDocId));
+          return resolve({ error: null, data: null });
+        }
+        // select single by id
+        const docSnap = await getDoc(doc(db, this.firestoreTable, directDocId));
+        if (docSnap.exists()) {
+          const docData = docSnap.data() as any;
+          if (this.tableName === 'profiles') {
+            if (!docData.full_name && (docData.first_name || docData.last_name)) {
+              docData.full_name = `${docData.first_name || ''} ${docData.other_name ? docData.other_name + ' ' : ''}${docData.last_name || ''}`.replace(/\s+/g, ' ').trim();
+            }
+          }
+          data = [{ id: docSnap.id, ...docData }];
+        }
       } else {
-        const q = query(collection(db, this.firestoreTable), ...this.filters, ...this.modifiers);
-        const snapshot = await getDocs(q);
+
+        let snapshot: any;
+        try {
+          const q = query(collection(db, this.firestoreTable), ...this.filters, ...this.modifiers);
+          snapshot = await getDocs(q);
+        } catch (queryErr: any) {
+          // Firestore throws when orderBy is used on a field that lacks an index
+          // or is missing from some documents. Retry without order modifiers and
+          // sort client-side using orderFields instead.
+          console.warn(`Shim: orderBy query failed for "${this.firestoreTable}", retrying without order:`, queryErr?.message);
+          const q = query(collection(db, this.firestoreTable), ...this.filters);
+          snapshot = await getDocs(q);
+        }
 
         if (this.operation === 'update') {
           for (const d of snapshot.docs) {
@@ -181,7 +222,33 @@ class QueryBuilder {
           return resolve({ error: null, data: null });
         }
 
-        data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data = snapshot.docs.map((d: any) => {
+          const docData = d.data();
+          if (this.tableName === 'profiles') {
+            if (!docData.full_name && (docData.first_name || docData.last_name)) {
+               docData.full_name = `${docData.first_name || ''} ${docData.other_name ? docData.other_name + ' ' : ''}${docData.last_name || ''}`.replace(/\s+/g, ' ').trim();
+            }
+          }
+          return { id: d.id, ...docData };
+        });
+
+        // Client-side sort fallback using stored orderFields meta
+        if (this.orderFields.length > 0) {
+          data.sort((a: any, b: any) => {
+            for (const { field, dir } of this.orderFields) {
+              const aVal = a[field] ?? '';
+              const bVal = b[field] ?? '';
+              const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+              if (cmp !== 0) return dir === 'desc' ? -cmp : cmp;
+            }
+            return 0;
+          });
+        }
+
+        // Apply limit client-side as safety net
+        if (this.limitCount !== null) {
+          data = data.slice(0, this.limitCount);
+        }
       }
 
       // Transform result shape for virtual tables

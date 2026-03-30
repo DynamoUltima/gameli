@@ -93,11 +93,11 @@ const PatientDashboard = () => {
 
   useEffect(() => {
     const loadProfile = async () => {
-      if (!user?.id) return;
+      if (!user?.uid) return;
       const { data: profile } = await supabase
         .from("profiles")
         .select("full_name, phone, gender, date_of_birth, hospital_card_id")
-        .eq("id", user.id)
+        .eq("id", user.uid)
         .maybeSingle();
 
       if (profile) {
@@ -111,10 +111,10 @@ const PatientDashboard = () => {
       }
     };
     loadProfile();
-  }, [user?.id]);
+  }, [user?.uid]);
 
   const fetchAppointments = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
     try {
       // Use start of today so appointments booked for today are always included.
       // Also include pending/confirmed (pending/confirmed) appointments regardless of
@@ -125,7 +125,7 @@ const PatientDashboard = () => {
       const { data: appointmentsData, error: appointmentsError } = await supabase
         .from('appointments')
         .select('*')
-        .eq('patient_id', user.id)
+        .eq('patient_id', user.uid)
         .order('scheduled_at', { ascending: false });
 
       if (appointmentsError) throw appointmentsError;
@@ -137,8 +137,12 @@ const PatientDashboard = () => {
         return (isPendingOrConfirmed || isFromToday) && apt.status !== 'cancelled' && apt.status !== 'completed';
       });
 
-      // Sort upcoming in descending order (most recently booked first)
-      upcoming.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      // Sort upcoming: use created_at if available, fall back to scheduled_at
+      upcoming.sort((a, b) => {
+        const aTime = new Date(a.created_at || a.scheduled_at || 0).getTime();
+        const bTime = new Date(b.created_at || b.scheduled_at || 0).getTime();
+        return bTime - aTime;
+      });
 
       const past = (appointmentsData || []).filter(apt => {
         const isPendingOrConfirmed = apt.status === 'pending' || apt.status === 'confirmed';
@@ -197,14 +201,14 @@ const PatientDashboard = () => {
     } finally {
       setLoadingAppointments(false);
     }
-  }, [user?.id]);
+  }, [user?.uid]);
 
   useEffect(() => {
     fetchAppointments();
   }, [fetchAppointments]);
 
   const fetchNotifications = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
     try {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -212,7 +216,7 @@ const PatientDashboard = () => {
       const { data: recentAppointments, error } = await supabase
         .from('appointments')
         .select('*')
-        .eq('patient_id', user.id)
+        .eq('patient_id', user.uid)
         .gte('created_at', sevenDaysAgo.toISOString())
         .order('created_at', { ascending: false });
 
@@ -256,7 +260,7 @@ const PatientDashboard = () => {
       const { data: formsData, error: formsError } = await supabase
         .from('medical_forms')
         .select('*')
-        .eq('patient_id', user.id)
+        .eq('patient_id', user.uid)
         .gte('created_at', sevenDaysAgo.toISOString())
         .order('created_at', { ascending: false });
 
@@ -298,7 +302,7 @@ const PatientDashboard = () => {
     } catch (error) {
       console.error('Error fetching notifications:', error);
     }
-  }, [user?.id]);
+  }, [user?.uid]);
 
   useEffect(() => {
     fetchNotifications();
@@ -322,15 +326,25 @@ const PatientDashboard = () => {
     return formatDate(timestamp);
   };
 
-  const calculateAge = (dateOfBirth: string) => {
+  const calculateAge = (dateOfBirth: any) => {
     if (!dateOfBirth) return null;
+    
+    let dateStr = dateOfBirth;
+    if (typeof dateOfBirth === 'object' && dateOfBirth.seconds) {
+      dateStr = new Date(dateOfBirth.seconds * 1000).toISOString();
+    }
+    
+    const birthDate = new Date(dateStr);
+    if (isNaN(birthDate.getTime())) return null;
+
     const today = new Date();
-    const birthDate = new Date(dateOfBirth);
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
+    
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
+    
     return age;
   };
 
@@ -344,7 +358,7 @@ const PatientDashboard = () => {
   };
 
   const handleSaveProfile = async () => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
     setEditingProfile(true);
     try {
       const { error } = await supabase
@@ -354,7 +368,7 @@ const PatientDashboard = () => {
           gender: editFormData.gender || null,
           date_of_birth: editFormData.date_of_birth || null
         })
-        .eq('id', user.id);
+        .eq('id', user.uid);
 
       if (error) throw error;
 

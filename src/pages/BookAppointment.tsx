@@ -353,6 +353,18 @@ const BookAppointment = () => {
           
         if (formErr) {
           console.error("Failed to create medical form req:", formErr);
+        } else {
+          // Notify the patient about their fertility intake form via email and SMS
+          const formLink = `${window.location.origin}/dashboard/patient`;
+          const fertilityFormData = {
+            patientEmail: formData.email,
+            patientPhone: dbPhone || formData.phone,
+            patientName: formData.name,
+            formLink,
+            date: dateStr,
+          };
+          sendEmail('fertility_form_link', fertilityFormData);
+          sendSms('fertility_form_link', fertilityFormData);
         }
 
         if (formData.bookAsCouple && formData.partnerEmail) {

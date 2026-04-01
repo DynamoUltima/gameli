@@ -13,6 +13,7 @@ interface PatientAppointmentsProps {
     onOpenHistory: () => void;
     formatDate: (timestamp: string) => string;
     formatTime: (timestamp: string) => string;
+    onRebook: (appointment: any) => void;
 }
 
 export const PatientAppointments = ({
@@ -22,7 +23,8 @@ export const PatientAppointments = ({
     onOpenBooking,
     onOpenHistory,
     formatDate,
-    formatTime
+    formatTime,
+    onRebook
 }: PatientAppointmentsProps) => {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 3;
@@ -150,25 +152,60 @@ export const PatientAppointments = ({
                                                   </div>
                                               </div>
                                           </div>
-                                          <Badge variant={apt.status === "pending" || apt.status === "confirmed" ? "default" : "secondary"} className="rounded-lg shadow-none font-medium px-2.5 py-1 uppercase text-[10px] tracking-wider">
-                                              {apt.status}
+                                          <Badge 
+                                              variant="outline"
+                                              className={`rounded-lg shadow-none font-medium px-2.5 py-1 uppercase text-[10px] tracking-wider ${
+                                                apt.status === "pending" && (apt.type === "hospital" || apt.type === "home")
+                                                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800"
+                                                  : apt.status === "confirmed"
+                                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+                                                  : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
+                                              }`}
+                                          >
+                                              {apt.status === "pending" && (apt.type === "hospital" || apt.type === "home")
+                                                ? "Awaiting Confirmation"
+                                                : apt.status}
                                           </Badge>
                                       </div>
-                                      {(apt.status === "pending" || apt.status === "confirmed") && apt.type === "online" && (
-                                          <Button 
-                                            className={`w-full mt-5 rounded-xl font-medium h-11 shadow-sm ${
-                                              apt.meet_link
-                                                ? "border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white dark:bg-slate-900 dark:hover:bg-slate-800"
-                                                : "bg-slate-100 text-slate-500 disabled:opacity-100 border-none dark:bg-slate-800/80 dark:text-slate-400"
-                                            }`} 
-                                            variant={apt.meet_link ? "default" : "outline"}
-                                            onClick={() => apt.meet_link ? window.open(apt.meet_link, '_blank') : null}
-                                            disabled={!apt.meet_link}
-                                          >
-                                              <Video className="w-4 h-4 mr-2" />
-                                              {apt.meet_link ? "Join Video Call" : "Link Not Ready"}
-                                          </Button>
-                                      )}
+                                      
+                                      {/* Actions */}
+                                      <div className="flex gap-2">
+                                          {(() => {
+                                              const appointmentTime = new Date(apt.scheduled_at).getTime();
+                                              const isPassed1Hour = Date.now() > appointmentTime + 60 * 60 * 1000;
+                                              const isWithin3Months = Date.now() <= appointmentTime + 90 * 24 * 60 * 60 * 1000;
+                                              const canRebook = apt.payment_status === 'paid' && apt.status !== 'completed' && isPassed1Hour && isWithin3Months;
+
+                                              return (
+                                                  <>
+                                                      {(apt.status === "pending" || apt.status === "confirmed") && apt.type === "online" && (
+                                                          <Button 
+                                                            className={`flex-1 mt-5 rounded-xl font-medium h-11 shadow-sm ${
+                                                              apt.meet_link && !isPassed1Hour
+                                                                ? "border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white dark:bg-slate-900 dark:hover:bg-slate-800"
+                                                                : "bg-slate-100 text-slate-500 disabled:opacity-100 border-none dark:bg-slate-800/80 dark:text-slate-400"
+                                                            }`} 
+                                                            variant={apt.meet_link && !isPassed1Hour ? "default" : "outline"}
+                                                            onClick={() => apt.meet_link && !isPassed1Hour ? window.open(apt.meet_link, '_blank') : null}
+                                                            disabled={!apt.meet_link || isPassed1Hour}
+                                                          >
+                                                              <Video className="w-4 h-4 mr-2" />
+                                                              {isPassed1Hour ? "Link Expired" : (apt.meet_link ? "Join Video Call" : "Link Not Ready")}
+                                                          </Button>
+                                                      )}
+                                                      {canRebook && (
+                                                          <Button 
+                                                            className="flex-1 mt-5 rounded-xl font-medium h-11 shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white border-none"
+                                                            onClick={() => onRebook(apt)}
+                                                          >
+                                                              <Calendar className="w-4 h-4 mr-2" />
+                                                              Rebook Appointment
+                                                          </Button>
+                                                      )}
+                                                  </>
+                                              );
+                                          })()}
+                                      </div>
                                   </div>
                               );
                           })}

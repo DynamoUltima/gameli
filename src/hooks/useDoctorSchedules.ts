@@ -180,28 +180,29 @@ export const useDoctorSchedules = (doctorId?: string) => {
       const dateEnd = new Date(date);
       dateEnd.setHours(23, 59, 59, 999);
       
-      const { data: existingAppointments, error: appointmentsError } = await supabase
+      const { data: rawAppointments, error: appointmentsError } = await supabase
         .from('appointments')
         .select('scheduled_at, status')
         .eq('doctor_id', doctorId)
         .gte('scheduled_at', dateStart.toISOString())
-        .lte('scheduled_at', dateEnd.toISOString())
-        .neq('status', 'cancelled'); // Exclude cancelled appointments
+        .lte('scheduled_at', dateEnd.toISOString());
       
       if (appointmentsError) {
         console.error('Error fetching existing appointments:', appointmentsError);
       }
       
-      // Create a set of booked times (rounded to nearest 30 minutes)
-      const bookedTimes = new Set<string>();
+      const existingAppointments = rawAppointments?.filter(apt => apt.status !== 'cancelled') || [];
+      
+      // Create a set of booked times using local H:MM keys to avoid UTC/local timezone mismatch
+      // Key format: "H:MM" derived from local time (e.g. "9:00" or "14:30")
+      const bookedTimeKeys = new Set<string>();
       if (existingAppointments) {
         existingAppointments.forEach((apt: any) => {
           const aptDate = new Date(apt.scheduled_at);
-          // Round to nearest 30 minutes
-          const minutes = aptDate.getMinutes();
-          const roundedMinutes = minutes < 30 ? 0 : 30;
-          aptDate.setMinutes(roundedMinutes, 0, 0);
-          bookedTimes.add(aptDate.toISOString());
+          // Round down to nearest 30-minute boundary
+          const roundedMinutes = aptDate.getMinutes() < 30 ? 0 : 30;
+          // Build a stable local-time key: "H:MM" (e.g. "9:00", "14:30")
+          bookedTimeKeys.add(`${aptDate.getHours()}:${String(roundedMinutes).padStart(2, '0')}`);
         });
       }
       
@@ -213,9 +214,9 @@ export const useDoctorSchedules = (doctorId?: string) => {
           if (slot.toDateString() === now.toDateString() && slot <= now) {
             return false;
           }
-          // Don't show booked slots
-          const slotKey = slot.toISOString();
-          return !bookedTimes.has(slotKey);
+          // Compare using local H:MM key to avoid timezone mismatch
+          const slotKey = `${slot.getHours()}:${String(slot.getMinutes()).padStart(2, '0')}`;
+          return !bookedTimeKeys.has(slotKey);
         })
         .map(slot => slot.toISOString());
       

@@ -47,12 +47,12 @@ const SystemToggle: React.FC<{ name: string; question: string }> = ({ name, ques
         </label>
       </div>
     </div>
-    <input type="text" name={`${name}_details`} placeholder="If yes, specify..." className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
+    <input type="text" name={`${name}_details`} placeholder="If yes, specify..." className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
   </div>
 );
 
 const RadioGroup: React.FC<{ name: string; options: string[] }> = ({ name, options }) => (
-  <div className="flex bg-slate-100/70 p-1 rounded-xl shrink-0">
+  <div className="flex bg-slate-100/70 p-1 rounded-xl shrink-0 w-fit">
     {options.map((opt, i) => {
        const val = opt.toLowerCase().replace(/[^a-z0-9]/g, '');
        return (
@@ -64,6 +64,105 @@ const RadioGroup: React.FC<{ name: string; options: string[] }> = ({ name, optio
     })}
   </div>
 );
+
+const SectionSubtitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="text-sm text-slate-500 mb-6 pb-4 border-b border-slate-100">{children}</p>
+);
+
+const PregnancyTable: React.FC = () => (
+  <div className="overflow-x-auto -mx-6 sm:mx-0">
+    <table className="w-full text-sm text-left border-collapse">
+      <thead>
+        <tr className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider">
+          <th className="px-4 py-3 border-b border-slate-200 min-w-[100px]">Pregnancy</th>
+          <th className="px-4 py-3 border-b border-slate-200 min-w-[80px]">Year</th>
+          <th className="px-4 py-3 border-b border-slate-200 min-w-[100px]">Duration (mo)</th>
+          <th className="px-4 py-3 border-b border-slate-200 min-w-[80px]">Father (Current?)</th>
+          <th className="px-4 py-3 border-b border-slate-200 min-w-[100px]">Outcome*</th>
+          <th className="px-4 py-3 border-b border-slate-200 min-w-[120px]">Complications</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {[1, 2, 3, 4, 5].map((num) => (
+          <tr key={num} className="hover:bg-slate-50/50 transition-colors">
+            <td className="px-4 py-3 font-medium text-slate-700">{num}{num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th'}</td>
+            <td className="px-4 py-3"><input type="text" name={`preg_${num}_year`} className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-slate-900" placeholder="YYYY" /></td>
+            <td className="px-4 py-3"><input type="text" name={`preg_${num}_duration`} className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-slate-900" placeholder="Months" /></td>
+            <td className="px-4 py-3">
+              <select name={`preg_${num}_father`} className="bg-transparent border-none p-0 focus:ring-0 text-sm w-full text-slate-900">
+                <option value="">-</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </td>
+            <td className="px-4 py-3">
+              <select name={`preg_${num}_outcome`} className="bg-transparent border-none p-0 focus:ring-0 text-sm w-full font-medium text-slate-900">
+                <option value="">Select...</option>
+                <option value="VD">Vaginal (VD)</option>
+                <option value="CS">C-Section (CS)</option>
+                <option value="AB">Abortion (AB)</option>
+                <option value="MS">Miscarriage (MS)</option>
+                <option value="EP">Ectopic (EP)</option>
+              </select>
+            </td>
+            <td className="px-4 py-3"><input type="text" name={`preg_${num}_complications`} className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-slate-900" placeholder="None" /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    <div className="mt-4 p-3 bg-slate-50 rounded-lg text-[11px] text-slate-500 italic">
+      *Outcomes: Vaginal Delivery=VD; Cesarean section=CS; Abortion=AB; Miscarriage=MS; Ectopic=EP
+    </div>
+  </div>
+);
+
+const FertilityTherapyTable: React.FC = () => {
+  const therapies = [
+    'Clomiphene citrate (Clomid)',
+    'Gonadotropins (Pergonal, Gonal-F, etc)',
+    'HCG (Profasi, Pregnyl)',
+    'GnRH Agonists (Lupron, Zoladex, etc)',
+    'Progesterone',
+    'Prednisone or Dexamethasone',
+    'Bromcriptine (Parlodel, Dostinex)',
+    'Artificial Insemination',
+    'Donor Insemination',
+    'In Vitro Fertilization / ICSI'
+  ];
+  return (
+    <div className="overflow-x-auto -mx-6 sm:mx-0 mt-4">
+      <table className="w-full text-sm text-left border-collapse">
+        <thead>
+          <tr className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider">
+            <th className="px-4 py-3 border-b border-slate-200">Drug/Treatment</th>
+            <th className="px-4 py-3 border-b border-slate-200">Dose</th>
+            <th className="px-4 py-3 border-b border-slate-200">Duration/Cycles</th>
+            <th className="px-4 py-3 border-b border-slate-200">When?</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {therapies.map((name, i) => (
+            <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+              <td className="px-4 py-3 font-medium text-slate-700 max-w-[200px]">{name}</td>
+              <td className="px-4 py-3"><input type="text" name={`therapy_${i}_dose`} className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-slate-900" /></td>
+              <td className="px-4 py-3"><input type="text" name={`therapy_${i}_duration`} className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-slate-900" /></td>
+              <td className="px-4 py-3"><input type="text" name={`therapy_${i}_when`} className="w-full bg-transparent border-none p-0 focus:ring-0 text-sm text-slate-900" /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const femaleMedicalHistoryFields = [
+  'Anemia', 'Diabetes', 'Ovarian cysts', 'Appendicitis', 'Gallbladder Problems', 
+  'Arthritis', 'Heart Disease', 'Blood Transfusions', 'Hepatitis', 
+  'Breast discharge-white', 'Breast pain', 'Excess facial hair', 
+  'High Blood Pressure', 'Seizures', 'Cancer', 'Kidney infections', 
+  'Thyroid Problems', 'Liver Problems', 'Tuberculosis (TB)', 
+  'Chronic Headaches', 'Migraine Headaches', 'Ulcers', 'Vision Problems'
+];
 
 const diseases = ['Birth Defects', 'Brain/ Spinal Defects', 'Cancer', 'Diabetes', 'Heart Disease', 'High Blood Pressure', 'Sickle Cell Disease', 'Thyroid Disease'];
 
@@ -119,11 +218,11 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6">
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Name</label>
-              <input type="text" name="personal_name" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="text" name="personal_name" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Marital Status</label>
-              <input type="text" name="personal_marital" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="text" name="personal_marital" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Date of Birth</label>
@@ -131,15 +230,15 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
             </div>
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Phone Number</label>
-              <input type="tel" name="personal_phone" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="tel" name="personal_phone" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
             <div className="space-y-2 text-sm sm:col-span-2">
               <label className="font-medium text-slate-700 block tracking-tight">Address</label>
-              <input type="text" name="personal_address" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="text" name="personal_address" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">E-mail</label>
-              <input type="email" name="personal_email" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="email" name="personal_email" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Educational Level</label>
@@ -160,12 +259,12 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
             </div>
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Occupation</label>
-              <input type="text" name="personal_occupation" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="text" name="personal_occupation" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
             <div className="space-y-2 text-sm sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6 pt-4 border-t border-slate-50">
               <div className="space-y-2">
                 <label className="font-medium text-slate-700 block tracking-tight">Partner's Name</label>
-                <input type="text" name="partner_name" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+                <input type="text" name="partner_name" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
               </div>
               <div className="space-y-2">
                 <label className="font-medium text-slate-700 block tracking-tight">Partner's Date of Birth</label>
@@ -199,7 +298,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
               <label className="text-sm font-medium text-slate-700 max-w-lg leading-relaxed">
                 How long have you been trying to achieve a pregnancy?
               </label>
-              <input type="text" name="hpi_trying_duration" placeholder="e.g. 2 years" className="w-full sm:w-48 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:border-slate-900 transition-all shrink-0" />
+              <input type="text" name="hpi_trying_duration" placeholder="e.g. 2 years" className="w-full sm:w-48 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:bg-white focus:border-slate-900 transition-all shrink-0" />
             </div>
 
             <ToggleQuestion name="hpi_q2" text="Has your female partner ever been pregnant before?" />
@@ -227,7 +326,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
               <label className="text-sm font-medium text-slate-700 max-w-lg leading-relaxed">
                 How often do you having sex (how many times per week)?
               </label>
-              <input type="text" name="hpi_sex_frequency" className="w-full sm:w-48 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:border-slate-900 transition-all shrink-0" />
+              <input type="text" name="hpi_sex_frequency" className="w-full sm:w-48 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:bg-white focus:border-slate-900 transition-all shrink-0" />
             </div>
 
             <div className="py-4 border-b border-slate-50">
@@ -245,7 +344,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                 </div>
               </div>
               <div className="pl-0 sm:pl-4 border-l-2 border-slate-100 mt-2">
-                <input type="text" name="hpi_lubricants_type" placeholder="If so, what type?" className="w-full sm:w-64 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
+                <input type="text" name="hpi_lubricants_type" placeholder="If so, what type?" className="w-full sm:w-64 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
               </div>
             </div>
 
@@ -280,8 +379,8 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-0 sm:pl-4 border-l-2 border-slate-100 mb-2">
-                <input type="text" name="prev_semen_date" placeholder="When was the last one done?" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
-                <input type="text" name="prev_semen_result" placeholder="What was the result?" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
+                <input type="text" name="prev_semen_date" placeholder="When was the last one done?" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
+                <input type="text" name="prev_semen_result" placeholder="What was the result?" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:bg-white focus:border-slate-900 transition-all" />
               </div>
             </div>
             
@@ -309,7 +408,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
           <div className="space-y-6">
             <div className="space-y-2 text-sm">
               <label className="font-medium text-slate-700 block tracking-tight">Current or Recent Employer/Position</label>
-              <input type="text" name="soc_employer" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400" />
+              <input type="text" name="soc_employer" className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-slate-900" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2">
@@ -318,7 +417,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                   <label className="text-sm font-medium text-slate-700">Do you drink alcohol?</label>
                   <RadioGroup name="soc_alc" options={['Yes', 'No']} />
                 </div>
-                <input type="text" name="soc_alc_qty" placeholder="Number of drinks per week" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
+                <input type="text" name="soc_alc_qty" placeholder="Number of drinks per week" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
               </div>
 
               <div className="space-y-3">
@@ -327,8 +426,8 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                   <RadioGroup name="soc_smk" options={['Yes', 'No']} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="text" name="soc_smk_qty" placeholder="Cigarettes per day" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
-                  <input type="text" name="soc_smk_yrs" placeholder="Years smoking" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
+                  <input type="text" name="soc_smk_qty" placeholder="Cigarettes per day" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
+                  <input type="text" name="soc_smk_yrs" placeholder="Years smoking" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
                 </div>
               </div>
 
@@ -337,7 +436,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                   <label className="text-sm font-medium text-slate-700">Use illicit drugs?</label>
                   <RadioGroup name="soc_drg" options={['Yes', 'No']} />
                 </div>
-                <input type="text" name="soc_drg_type" placeholder="If yes, specify (marijuana, etc.)" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
+                <input type="text" name="soc_drg_type" placeholder="If yes, specify (marijuana, etc.)" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
               </div>
 
               <div className="space-y-3">
@@ -346,8 +445,8 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                   <RadioGroup name="soc_exc" options={['Yes', 'No']} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="text" name="soc_exc_type" placeholder="Type" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
-                  <input type="text" name="soc_exc_hrs" placeholder="Hours per week" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
+                  <input type="text" name="soc_exc_type" placeholder="Type" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
+                  <input type="text" name="soc_exc_hrs" placeholder="Hours per week" className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
                 </div>
               </div>
 
@@ -356,7 +455,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
                   <label className="text-sm font-medium text-slate-700">Are you on a special diet?</label>
                   <RadioGroup name="soc_diet" options={['Yes', 'No']} />
                 </div>
-                <input type="text" name="soc_diet_type" placeholder="Type of diet" className="w-full sm:w-1/2 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-slate-900" />
+                <input type="text" name="soc_diet_type" placeholder="Type of diet" className="w-full sm:w-1/2 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-slate-900" />
               </div>
             </div>
           </div>
@@ -385,19 +484,19 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
           <div className="space-y-6 pt-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 block tracking-tight">List any medical problems you may have</label>
-              <textarea name="med_problems" rows={3} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm resize-none"></textarea>
+              <textarea name="med_problems" rows={3} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm text-slate-900 resize-none"></textarea>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 block tracking-tight">List any medications that you take (include prescription, OTC, herbs, supplements) and doses if known</label>
-              <textarea name="med_medications" rows={3} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm resize-none"></textarea>
+              <textarea name="med_medications" rows={3} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm text-slate-900 resize-none"></textarea>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 block tracking-tight">List any surgeries that you have had</label>
-              <textarea name="med_surgeries" rows={2} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm resize-none"></textarea>
+              <textarea name="med_surgeries" rows={2} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm text-slate-900 resize-none"></textarea>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 block tracking-tight">List any medicines that you are allergic to, and what type of reaction you had</label>
-              <textarea name="med_allergies" rows={2} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm resize-none"></textarea>
+              <textarea name="med_allergies" rows={2} className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm text-slate-900 resize-none"></textarea>
             </div>
           </div>
         </div>
@@ -433,7 +532,7 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
 
           <div className="space-y-2 mt-6">
             <label className="text-sm font-medium text-slate-700 block tracking-tight">Who? (Please specify family member and condition)</label>
-            <input type="text" name="fam_who" className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm" />
+            <input type="text" name="fam_who" className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-900 transition-all placeholder:text-slate-400 text-sm text-slate-900" />
           </div>
         </div>
 

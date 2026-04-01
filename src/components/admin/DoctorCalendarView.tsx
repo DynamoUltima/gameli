@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
@@ -10,19 +10,26 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface DoctorCalendarViewProps {
   onClose: () => void;
   selectedDoctorId?: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   doctorsData: any[];
 }
 
 export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: DoctorCalendarViewProps) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [activeDoctor, setActiveDoctor] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
   const { toast } = useToast();
 
   useEffect(() => {
@@ -36,15 +43,9 @@ export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: D
     } else if (doctorsData && doctorsData.length > 0 && !activeDoctor) {
       setActiveDoctor(doctorsData[0]);
     }
-  }, [selectedDoctorId, doctorsData]);
+  }, [selectedDoctorId, doctorsData, activeDoctor]);
 
-  useEffect(() => {
-    if (activeDoctor) {
-      fetchAvailability(activeDoctor.user_id);
-    }
-  }, [activeDoctor, currentMonth]);
-
-  const fetchAvailability = async (doctorId: string) => {
+  const fetchAvailability = useCallback(async (doctorId: string) => {
     setLoadingAvailability(true);
     try {
       // Get start and end of the currently viewed month
@@ -58,6 +59,7 @@ export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: D
 
       if (error) throw error;
       setAvailabilitySlots(data || []);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error("Error fetching availability:", error);
       toast({
@@ -68,7 +70,44 @@ export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: D
     } finally {
       setLoadingAvailability(false);
     }
-  };
+  }, [currentMonth, toast]);
+
+  const fetchAppointments = useCallback(async (doctorId: string) => {
+    try {
+      const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+      const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+
+      // Firestore doesn't support compound inequality filters across different fields
+      // without a composite index. Fetch all pending/confirmed for this doctor and
+      // filter by date range client-side.
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('doctor_id', doctorId)
+        .in('status', ['pending', 'confirmed']);
+
+      if (error) throw error;
+
+      // Client-side date range filter
+      const filtered = (data || []).filter((apt: any) => {
+        if (!apt.scheduled_at) return false;
+        return apt.scheduled_at >= startOfMonth && apt.scheduled_at <= endOfMonth;
+      });
+
+      setAppointments(filtered);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
+      console.error("Error fetching appointments:", error);
+    }
+  }, [currentMonth]);
+
+
+  useEffect(() => {
+    if (activeDoctor) {
+      fetchAvailability(activeDoctor.user_id);
+      fetchAppointments(activeDoctor.user_id);
+    }
+  }, [activeDoctor, fetchAvailability, fetchAppointments]);
 
   const nextMonth = () => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
@@ -165,6 +204,38 @@ export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: D
       : `${formatTimeStr(firstSlot.start_time)} - ${formatTimeStr(firstSlot.end_time)}`;
 
     return { type, displayText };
+  };
+
+  const getDayAppointments = (date: Date) => {
+    const dateStr = getDateString(date);
+    
+    // Filter appointments for this date and matching the active tab (if not 'all')
+    const dayAppts = appointments.filter((apt) => {
+      if (!apt.scheduled_at) return false;
+      const aptDateStr = getDateString(new Date(apt.scheduled_at));
+      if (aptDateStr !== dateStr) return false;
+      
+      const type = apt.type || apt.appointment_type || 'hospital';
+      if (activeTab !== "all" && type !== activeTab) return false;
+      
+      return true;
+    });
+
+    // Count by type
+    const counts = {
+      online: 0,
+      home: 0,
+      hospital: 0,
+    };
+    
+    dayAppts.forEach(apt => {
+      const type = apt.type || apt.appointment_type || 'hospital';
+      if (type === 'online') counts.online++;
+      else if (type === 'home') counts.home++;
+      else counts.hospital++;
+    });
+
+    return { counts, total: dayAppts.length };
   };
 
   const getInitials = (name: string) => {
@@ -274,25 +345,47 @@ export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: D
 
         {/* Calendar Grid Container */}
         <div className="flex-1 overflow-y-auto p-5 md:p-8 flex flex-col bg-[#12161f]/30 hide-scrollbar h-full">
-          {/* Legend */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-6 px-1">
-            <div className="flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-emerald-500/20 border border-emerald-500/40"></span>
-              <span className="text-base font-medium text-slate-300">Available</span>
+          {/* Tabs and Legend */}
+          <div className="flex flex-col gap-4 mb-6 px-1">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
+                <TabsList className="bg-[#1e2432] border border-slate-700/60 p-1">
+                  <TabsTrigger value="all" className="data-[state=active]:bg-slate-700/60 data-[state=active]:text-white text-slate-400">All Visits</TabsTrigger>
+                  <TabsTrigger value="online" className="data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400 text-slate-400">Online</TabsTrigger>
+                  <TabsTrigger value="home" className="data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400 text-slate-400">Home</TabsTrigger>
+                  <TabsTrigger value="hospital" className="data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400 text-slate-400">Hospital</TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <div className="flex items-center">
+                <Button variant="ghost" className="text-base font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1.5">
+                  <Settings2 className="w-4 h-4" />
+                  Edit Template
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-blue-500/20 border border-blue-500/40"></span>
-              <span className="text-base font-medium text-slate-300">Partial Day</span>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-[#1e2432] border border-slate-700/60"></span>
-              <span className="text-base font-medium text-slate-400">Off Duty</span>
-            </div>
-            <div className="ml-auto flex">
-              <Button variant="ghost" className="text-base font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1.5">
-                <Settings2 className="w-4 h-4" />
-                Edit Template
-              </Button>
+
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded bg-blue-500/20 border border-blue-500/40 text-[10px] text-blue-400 flex items-center justify-center font-bold">O</span>
+                <span className="text-sm font-medium text-slate-300">Online</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded bg-emerald-500/20 border border-emerald-500/40 text-[10px] text-emerald-400 flex items-center justify-center font-bold">H</span>
+                <span className="text-sm font-medium text-slate-300">Home</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded bg-purple-500/20 border border-purple-500/40 text-[10px] text-purple-400 flex items-center justify-center font-bold">H</span>
+                <span className="text-sm font-medium text-slate-300">Hospital</span>
+              </div>
+              <div className="h-4 w-px bg-slate-700/60 mx-2 hidden sm:block"></div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded-full bg-emerald-500/20 border border-emerald-500/40"></span>
+                <span className="text-sm font-medium text-slate-400">Available</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded-full bg-blue-500/20 border border-blue-500/40"></span>
+                <span className="text-sm font-medium text-slate-400">Partial Day</span>
+              </div>
             </div>
           </div>
 
@@ -310,34 +403,55 @@ export const DoctorCalendarView = ({ onClose, selectedDoctorId, doctorsData }: D
               {calendarCells.map((cell, index) => {
                 const isToday = getDateString(cell.date) === getDateString(new Date());
                 const avail = getDayAvailability(cell.date);
+                const dayAppts = cell.isCurrentMonth ? getDayAppointments(cell.date) : { counts: { online: 0, home: 0, hospital: 0 }, total: 0 };
 
                 return (
                   <div 
                     key={index} 
-                    className={`bg-[#171b24] p-2.5 sm:p-3 flex flex-col gap-1 min-h-[100px] transition-colors relative
+                    className={`bg-[#171b24] p-2 sm:p-2.5 flex flex-col gap-1 min-h-[100px] transition-colors relative
                       ${!cell.isCurrentMonth ? 'opacity-40' : 'hover:bg-[#1e2432]/60 group cursor-pointer'}
                       ${isToday ? 'ring-inset ring-2 ring-blue-500 bg-blue-500/[0.02]' : ''}
                     `}
                   >
-                    <div className={`flex items-center justify-between w-full`}>
+                    <div className={`flex items-center justify-between w-full mb-1`}>
                       <span className={`text-base font-medium transition-colors 
                         ${!cell.isCurrentMonth ? 'text-slate-500' : isToday ? 'text-white font-bold' : 'text-slate-400 group-hover:text-white'}
                       `}>
                         {cell.date.getDate()}
                       </span>
-                      {isToday && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm"></span>}
+                      {isToday && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm leading-none shrink-0"></span>}
                     </div>
                     
                     {cell.isCurrentMonth && avail && (
-                      <div className="mt-auto flex flex-col gap-1.5 w-full">
-                        <div className={`px-2 py-1.5 rounded-lg text-xs font-semibold tracking-wide truncate w-full text-center transition-colors
+                      <div className="flex flex-col gap-1 w-full opacity-60">
+                        <div className={`px-1.5 py-0.5 rounded text-[10px] sm:text-xs font-semibold tracking-wide truncate w-full text-center transition-colors
                           ${avail.type === 'available' 
-                            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500/20' 
-                            : 'bg-blue-500/10 border border-blue-500/20 text-blue-400 group-hover:bg-blue-500/20'
+                            ? 'bg-emerald-500/5 border border-emerald-500/10 text-emerald-500/70 group-hover:bg-emerald-500/10' 
+                            : 'bg-blue-500/5 border border-blue-500/10 text-blue-500/70 group-hover:bg-blue-500/10'
                           }
                         `}>
                           {avail.displayText}
                         </div>
+                      </div>
+                    )}
+                    
+                    {cell.isCurrentMonth && dayAppts.total > 0 && (
+                      <div className="mt-auto flex flex-col gap-0.5 w-full pt-1">
+                        {dayAppts.counts.online > 0 && (
+                          <div className="px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-bold text-center truncate shadow-sm">
+                            {dayAppts.counts.online} Online
+                          </div>
+                        )}
+                        {dayAppts.counts.home > 0 && (
+                          <div className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold text-center truncate shadow-sm">
+                            {dayAppts.counts.home} Home
+                          </div>
+                        )}
+                        {dayAppts.counts.hospital > 0 && (
+                          <div className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold text-center truncate shadow-sm">
+                            {dayAppts.counts.hospital} Hospital
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

@@ -31,9 +31,10 @@ interface PatientBookingModalProps {
     patientName?: string;
     patientEmail?: string;
     patientPhone?: string;
+    rebookingAppointment?: any;
 }
 
-export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, bookingType, patientName, patientEmail, patientPhone }: PatientBookingModalProps) => {
+export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, bookingType, patientName, patientEmail, patientPhone, rebookingAppointment }: PatientBookingModalProps) => {
     const [currentStep, setCurrentStep] = useState(1);
     const totalSteps = 5;
 
@@ -71,12 +72,13 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
     const { toast } = useToast();
     const { user } = useAuth();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [bookedAppointmentId, setBookedAppointmentId] = useState<string | null>(null);
 
     const { doctors, specialties, loading } = useDoctors();
     const { getAvailableSlots } = useDoctorSchedules();
 
     const selectedSpecialty = specialties.find(s => s.id === clinic);
-    const amountToPay = selectedSpecialty?.cost || (bookingType === 'hospital' ? 144 : bookingType === 'online' ? 45 : 0);
+    const amountToPay = rebookingAppointment ? 0 : (selectedSpecialty?.cost || (bookingType === 'hospital' ? 144 : bookingType === 'online' ? 45 : 0));
     const filteredDoctors = doctors.filter(doc => 
         (doc.specialty_id === clinic || doc.specialties?.some(s => s.id === clinic)) && doc.available
     );
@@ -174,21 +176,52 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                 scheduledAt = dateObj.toISOString();
             }
             
-            const { data: appt, error: apptErr } = await supabase
-                .from('appointments' as any)
-                .insert({
-                    patient_id: (user as any)?.uid || (user as any)?.id,
-                    doctor_id: preferredDoctor,
-                    clinic: (specialties.find(s => s.id === clinic)?.name) || null,
-                    specialty_id: clinic || null,
-                    type: bookingType,
-                    scheduled_at: scheduledAt ?? new Date().toISOString(),
-                    symptoms: "Online consultation booking", // Default symptom or text from form if available
-                    status: "confirmed",
-                    payment_status: paymentReference ? "paid" : "pending"
-                })
-                .select('id, doctor_id, scheduled_at')
-                .maybeSingle();
+            let appt;
+            let apptErr;
+
+            if (rebookingAppointment) {
+                const { data, error } = await supabase
+                    .from('appointments' as any)
+                    .update({
+                        doctor_id: preferredDoctor,
+                        clinic: (specialties.find(s => s.id === clinic)?.name) || null,
+                        specialty_id: clinic || null,
+                        type: bookingType,
+                        scheduled_at: scheduledAt ?? new Date().toISOString(),
+                        symptoms: "Online consultation booking (Rebooked)",
+                        status: "pending"
+                    })
+                    .eq('id', rebookingAppointment.id)
+                    .select('id, doctor_id, scheduled_at')
+                    .maybeSingle();
+                appt = data;
+                apptErr = error;
+            } else {
+                const { data, error } = await supabase
+                    .from('appointments' as any)
+                    .insert({
+                        patient_id: (user as any)?.uid || (user as any)?.id,
+                        doctor_id: preferredDoctor,
+                        clinic: (specialties.find(s => s.id === clinic)?.name) || null,
+                        specialty_id: clinic || null,
+                        type: bookingType,
+                        scheduled_at: scheduledAt ?? new Date().toISOString(),
+                        created_at: new Date().toISOString(),
+                        symptoms: bookingType === 'home' ? "Home visit booking" : bookingType === 'hospital' ? "Hospital visit booking" : "Online consultation booking",
+                        // hospital & home visits always start pending — admin must confirm
+                        // online consultations with payment are auto-confirmed
+                        status: (bookingType === 'online' && paymentReference) ? "confirmed" : "pending",
+                        payment_status: paymentReference ? "paid" : "pending"
+                    })
+                    .select('id, doctor_id, scheduled_at')
+                    .maybeSingle();
+                appt = data;
+                apptErr = error;
+            }
+
+            if (appt) {
+                setBookedAppointmentId((appt as any).id || null);
+            }
                 
             if (apptErr) throw apptErr;
 
@@ -251,6 +284,17 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                     
                 if (formErr) {
                     console.error("Failed to create medical form:", formErr);
+                } else {
+                    const formLink = `${window.location.origin}/dashboard/patient`;
+                    const fertilityFormData = {
+                        patientEmail: personalEmail || patientEmail,
+                        patientPhone: isBookingForOther ? otherPatientPhone : (personalPhone || patientPhone),
+                        patientName: isBookingForOther ? otherPatientName : (`${firstName} ${lastName}`.trim() || patientName),
+                        formLink,
+                        date: dateStr,
+                    };
+                    sendEmail('fertility_form_link', fertilityFormData);
+                    sendSms('fertility_form_link', fertilityFormData);
                 }
 
                 if (consultationFor === 'couple' && partnerEmail) {
@@ -305,7 +349,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
             
             if (!isSubmitting) {
                 setIsSubmitting(true);
-                if (amountToPay > 0) {
+                if (amountToPay > 0 && !rebookingAppointment) {
                     initializePayment({
                         onSuccess: (reference) => {
                             processBookingSuccess(reference);
@@ -905,7 +949,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                         <div className="space-y-8 animate-fade-in flex flex-col">
                             <div>
                                 <h3 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white mb-1">
-                                    {bookingType === 'hospital' ? 'Confirmation' : 'Confirmation & Payment'}
+                                    {(bookingType === 'hospital' || rebookingAppointment) ? 'Confirmation' : 'Confirmation & Payment'}
                                 </h3>
                                 <p className="text-slate-500 dark:text-slate-400 font-normal mt-4 text-sm sm:text-base px-2">
                                     Your appointment has been confirmed for {selectedDate ? format(selectedDate, 'MMMM do') : ''} at {selectedTime}. You'll receive a confirmation email shortly.
@@ -934,6 +978,12 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                     <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 p-4 rounded-xl">
                                         <p className="text-sm text-amber-800 dark:text-amber-300">
                                             <strong>Note:</strong> Our admin team will contact you shortly to confirm the appointment. Payment will be completed at the hospital.
+                                        </p>
+                                    </div>
+                                ) : rebookingAppointment ? (
+                                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 p-4 rounded-xl">
+                                        <p className="text-sm text-blue-800 dark:text-blue-300">
+                                            <strong>Note:</strong> You are rebooking an existing appointment. No additional payment is required.
                                         </p>
                                     </div>
                                 ) : (
@@ -1029,12 +1079,55 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                         <span className="text-sm font-medium text-slate-900 dark:text-white">{patientName || "James Bond"}</span>
                                     </div>
                                     <div className="flex justify-between items-center">
-                                        <span className="text-sm text-slate-500 dark:text-slate-400">Txn ID</span>
-                                        <span className="text-sm font-medium text-slate-900 dark:text-white">#TXN-84920</span>
+                                        <span className="text-sm text-slate-500 dark:text-slate-400">Receipt No.</span>
+                                        <span className="text-sm font-medium text-slate-900 dark:text-white font-mono">
+                                            {bookedAppointmentId ? `#RCP-${bookedAppointmentId.slice(-6).toUpperCase()}` : '#RCP-000000'}
+                                        </span>
                                     </div>
                                 </div>
 
-                                <button type="button" className="w-full py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2 relative z-0">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const receiptNo = bookedAppointmentId ? `#RCP-${bookedAppointmentId.slice(-6).toUpperCase()}` : '#RCP-000000';
+                                        const serviceLabel = bookingType ? bookingType.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase()) + ' Booking' : 'Booking';
+                                        const dateTimeLabel = `${selectedDate ? format(selectedDate, 'MMM do, yyyy') : ''}${selectedTime ? ', ' + selectedTime : ''}`;
+                                        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt ${receiptNo}</title><style>
+                                            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+                                            * { box-sizing: border-box; margin: 0; padding: 0; }
+                                            body { font-family: 'Inter', sans-serif; background: #fff; color: #0f172a; padding: 40px; }
+                                            .header { text-align: center; margin-bottom: 32px; }
+                                            .header h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+                                            .header p { font-size: 13px; color: #64748b; }
+                                            .receipt-box { border: 1.5px solid #e2e8f0; border-radius: 16px; padding: 28px; max-width: 420px; margin: 0 auto; }
+                                            .receipt-label { text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8; margin-bottom: 4px; }
+                                            .receipt-amount { text-align: center; font-size: 36px; font-weight: 600; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1.5px dashed #cbd5e1; }
+                                            .row { display: flex; justify-content: space-between; margin-bottom: 14px; font-size: 14px; }
+                                            .row .label { color: #64748b; }
+                                            .row .value { font-weight: 500; }
+                                            .receipt-no { font-family: monospace; }
+                                            .footer { text-align: center; margin-top: 28px; font-size: 12px; color: #94a3b8; }
+                                            @media print { body { padding: 0; } @page { margin: 20mm; } }
+                                        </style></head><body>
+                                            <div class="header">
+                                                <h1>St. Gamaliel's Hospital</h1>
+                                                <p>Payment Receipt</p>
+                                            </div>
+                                            <div class="receipt-box">
+                                                <div class="receipt-label">RECEIPT</div>
+                                                <div class="receipt-amount">${amountToPay} GHS</div>
+                                                <div class="row"><span class="label">Service</span><span class="value">${serviceLabel}</span></div>
+                                                <div class="row"><span class="label">Date &amp; Time</span><span class="value">${dateTimeLabel}</span></div>
+                                                <div class="row"><span class="label">Patient</span><span class="value">${patientName || ''}</span></div>
+                                                <div class="row"><span class="label">Receipt No.</span><span class="value receipt-no">${receiptNo}</span></div>
+                                            </div>
+                                            <div class="footer">Thank you for choosing St. Gamaliel's Hospital</div>
+                                        </body></html>`;
+                                        const win = window.open('', '_blank', 'width=520,height=700');
+                                        if (win) { win.document.write(html); win.document.close(); win.onload = () => win.print(); }
+                                    }}
+                                    className="w-full py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2 relative z-0"
+                                >
                                     <Download className="w-5 h-5" />
                                     Download Receipt
                                 </button>
@@ -1068,8 +1161,8 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                 {isSubmitting ? 'Processing...' :
                                  currentStep === 1 ? 'Next: Medical Details' :
                                     currentStep === 2 ? 'Next: Select Date' :
-                                        currentStep === 3 ? (bookingType === 'hospital' ? 'Next: Confirmation' : 'Next: Payment') : 
-                                            (bookingType === 'hospital' ? 'Submit Request' : 'Pay & Confirm')}
+                                        currentStep === 3 ? ((bookingType === 'hospital' || rebookingAppointment) ? 'Next: Confirmation' : 'Next: Payment') : 
+                                            ((bookingType === 'hospital' || rebookingAppointment) ? 'Submit Request' : 'Pay & Confirm')}
                             </span>
                             {currentStep === 4 ? <CheckCircle className="w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
                         </button>

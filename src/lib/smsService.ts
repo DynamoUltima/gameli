@@ -9,6 +9,7 @@ const SMS_API_URL = import.meta.env.VITE_SMS_API_URL;
 export type SmsType =
   | 'appointment_confirmation'
   | 'doctor_booking_notification'
+  | 'fertility_form_link'
   | 'payment_receipt';
 
 interface SmsResponse {
@@ -38,6 +39,10 @@ export async function sendSms(
     case 'doctor_booking_notification':
       phone = data.doctorPhone;
       message = `Dr. ${data.doctorName}, you have a new ${data.type} appointment with ${data.patientName} on ${data.date} at ${data.time}.`;
+      break;
+    case 'fertility_form_link':
+      phone = data.patientPhone;
+      message = `Dear ${data.patientName}, a Fertility Intake Form has been assigned to you for your upcoming appointment. Please log in to complete it: ${data.formLink}`;
       break;
     case 'payment_receipt':
       phone = data.patientPhone;

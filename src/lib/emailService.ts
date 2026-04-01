@@ -12,9 +12,11 @@ export type EmailType =
   | 'appointment_confirmation'
   | 'doctor_booking_notification'
   | 'partner_fertility_form'
+  | 'fertility_form_link'
   | 'doctor_welcome'
   | 'patient_welcome'
-  | 'payment_receipt';
+  | 'payment_receipt'
+  | 'bulk_message';
 
 interface EmailResponse {
   success?: boolean;

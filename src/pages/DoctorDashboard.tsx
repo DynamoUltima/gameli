@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList, Download } from "lucide-react";
+import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList, Download, CheckCircle2 } from "lucide-react";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
@@ -64,6 +64,136 @@ const DoctorDashboard = () => {
   const [isSavingNoteId, setIsSavingNoteId] = useState<string | null>(null);
   // Viewing a medical form questionnaire
   const [viewingForm, setViewingForm] = useState<any | null>(null);
+  // Tracking which appointment is being marked as completed
+  const [markingCompleteId, setMarkingCompleteId] = useState<string | null>(null);
+
+  const generateFormPDF = (form: any) => {
+    if (!form) return;
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    let y = margin;
+
+    const formLabel =
+      form.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' :
+      form.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' :
+      form.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' :
+      'Medical Questionnaire';
+
+    // ---- Header ----
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.rect(0, 0, pageWidth, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("ST. GAMALIEL'S HOSPITAL", margin, 11);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(formLabel.toUpperCase(), margin, 18);
+    const submittedDate = form.created_at
+      ? new Date(form.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      : 'N/A';
+    doc.text(`Submitted: ${submittedDate}  ·  Status: ${(form.status || 'submitted').toUpperCase()}`, margin, 24);
+    y = 36;
+
+    if (!form.data || Object.keys(form.data).length === 0) {
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(11);
+      doc.text('No responses recorded in this questionnaire.', margin, y + 10);
+      doc.save(`fertility-questionnaire-${form.id?.slice(-6) || 'form'}.pdf`);
+      return;
+    }
+
+    // ---- Group entries into sections ----
+    const sectionPrefixes: Record<string, string> = {
+      personal_: 'Personal Information',
+      partner_: 'Partner Information',
+      referral_: 'Referral',
+      hpi_: 'History of Present Illness',
+      prev_: 'Previous Tests',
+      soc_: 'Social History',
+      sys: 'Review of Systems',
+      med_: 'Medical Notes',
+      fam_: 'Family History',
+      disease_: 'Family Diseases',
+      // Female-specific
+      menarche_: 'Gynecological History',
+      lmp_: 'Gynecological History',
+      periods_: 'Gynecological History',
+      cycle_: 'Gynecological History',
+      flow_: 'Gynecological History',
+      intermenstrual_: 'Gynecological History',
+      history_: 'Medical History',
+      female_: 'Medical History',
+      preg_: 'Pregnancy History',
+      therapy_: 'Fertility Therapy',
+      test_: 'Fertility Testing',
+      ovulation_: 'Ovulatory Dysfunction',
+      ros_: 'Review of Systems',
+      family_: 'Family History',
+    };
+
+    const sections: Record<string, { key: string; label: string; value: string }[]> = {};
+    const miscRows: { key: string; label: string; value: string }[] = [];
+
+    Object.entries(form.data as Record<string, any>).forEach(([key, value]) => {
+      if (!value && value !== 0) return;
+      const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      const strValue = String(value);
+      let matched = false;
+      for (const [prefix, section] of Object.entries(sectionPrefixes)) {
+        if (key.startsWith(prefix)) {
+          if (!sections[section]) sections[section] = [];
+          sections[section].push({ key, label, value: strValue });
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) miscRows.push({ key, label, value: strValue });
+    });
+
+    if (miscRows.length) sections['Other'] = miscRows;
+
+    // ---- Render each section as a table ----
+    Object.entries(sections).forEach(([sectionName, rows]) => {
+      if (rows.length === 0) return;
+
+      // Section heading
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(30, 64, 175); // blue-800
+      doc.text(sectionName.toUpperCase(), margin, y);
+      y += 2;
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [['Field', 'Response']],
+        body: rows.map(r => [r.label, r.value]),
+        styles: { fontSize: 8.5, cellPadding: 3, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85], fontStyle: 'bold', fontSize: 8 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: { 0: { cellWidth: 70, fontStyle: 'bold' }, 1: { cellWidth: 'auto' } },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 8;
+
+      // Page break guard
+      if (y > 270) { doc.addPage(); y = margin; }
+    });
+
+    // ---- Footer on each page ----
+    const totalPages = (doc.internal as any).getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`St. Gamaliel's Hospital · Confidential Medical Record · Page ${i} of ${totalPages}`, margin, 290);
+    }
+
+    doc.save(`${form.form_type || 'medical'}-questionnaire-${form.id?.slice(-6) || 'form'}.pdf`);
+  };
 
   // Pagination state for Today's Schedule
   const [currentPage, setCurrentPage] = useState(1);
@@ -254,8 +384,9 @@ const DoctorDashboard = () => {
           )
         `)
         .eq('doctor_id', user.uid)
-        // No status filter - include ALL statuses (pending, confirmed, completed, cancelled)
-        // No date filter - include ALL dates so calendar works for any month
+        // Show confirmed and completed appointments in the doctor's calendar/schedule
+        // Pending appointments need admin approval first
+        .in('status', ['confirmed', 'completed'])
         .order('scheduled_at', { ascending: true });
 
       if (error) {
@@ -551,6 +682,34 @@ const DoctorDashboard = () => {
       ));
     }
     setIsSavingNotes(false);
+  };
+
+  // Mark an appointment as completed after meeting
+  const handleMarkCompleted = async (appointmentId: string) => {
+    setMarkingCompleteId(appointmentId);
+    try {
+      const { error } = await supabase
+        .from('appointments')
+        .update({ status: 'completed' })
+        .eq('id', appointmentId);
+
+      if (error) throw error;
+
+      toast({ title: "Appointment completed", description: "The appointment has been marked as completed." });
+
+      // Update local state
+      setAllAppointments(prev =>
+        prev.map(apt => apt.id === appointmentId ? { ...apt, status: 'completed' } : apt)
+      );
+      setTodayAppointments(prev =>
+        prev.filter(apt => apt.id !== appointmentId)
+      );
+    } catch (error: any) {
+      console.error('Error marking appointment complete:', error);
+      toast({ title: 'Error', description: error.message || 'Failed to mark appointment as completed.', variant: 'destructive' });
+    } finally {
+      setMarkingCompleteId(null);
+    }
   };
 
   // Save notes inline from the patient profile timeline
@@ -1366,7 +1525,7 @@ const DoctorDashboard = () => {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  {apt.type === "online" && apt.status !== 'cancelled' && (
+                                  {apt.status !== 'completed' && apt.status !== 'cancelled' && apt.type === "online" && (
                                     <>
                                       {apt.meet_link ? (
                                         <Button size="sm" variant="default" title="Start video call" onClick={() => window.open(apt.meet_link, '_blank')}>
@@ -1380,6 +1539,24 @@ const DoctorDashboard = () => {
                                         </Button>
                                       )}
                                     </>
+                                  )}
+                                  {apt.status !== 'completed' && apt.status !== 'cancelled' && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-green-700 border-green-300 hover:bg-green-50 hover:border-green-400 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-950"
+                                      disabled={markingCompleteId === apt.id}
+                                      onClick={() => handleMarkCompleted(apt.id)}
+                                    >
+                                      <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                                      {markingCompleteId === apt.id ? 'Completing...' : 'Mark Complete'}
+                                    </Button>
+                                  )}
+                                  {apt.status === 'completed' && (
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400 px-2 py-1 bg-green-50 dark:bg-green-950 rounded-md border border-green-200 dark:border-green-800">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      Completed
+                                    </span>
                                   )}
                                 </div>
                               </div>
@@ -1466,21 +1643,33 @@ const DoctorDashboard = () => {
                                 </div>
                               </div>
                             </div>
-                            {apt.type === "online" && (
-                              <div className="flex flex-col gap-2">
-                                {apt.meet_link ? (
-                                  <Button size="sm" variant="default" onClick={() => window.open(apt.meet_link, '_blank')}>
-                                    <Video className="w-4 h-4 mr-2" />
-                                    Join
-                                  </Button>
-                                ) : (
-                                  <Button size="sm" variant="outline" disabled={isGeneratingMeetLink === apt.id} onClick={() => handleCreateMeetLink(apt.id)}>
-                                    <Video className="w-4 h-4 mr-2" />
-                                    {isGeneratingMeetLink === apt.id ? 'Creating...' : 'Create Link'}
-                                  </Button>
-                                )}
-                              </div>
-                            )}
+                            <div className="flex flex-col gap-2 items-end">
+                              {apt.type === "online" && (
+                                <>
+                                  {apt.meet_link ? (
+                                    <Button size="sm" variant="default" onClick={() => window.open(apt.meet_link, '_blank')}>
+                                      <Video className="w-4 h-4 mr-2" />
+                                      Join
+                                    </Button>
+                                  ) : (
+                                    <Button size="sm" variant="outline" disabled={isGeneratingMeetLink === apt.id} onClick={() => handleCreateMeetLink(apt.id)}>
+                                      <Video className="w-4 h-4 mr-2" />
+                                      {isGeneratingMeetLink === apt.id ? 'Creating...' : 'Create Link'}
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-green-700 border-green-300 hover:bg-green-50 hover:border-green-400 dark:text-green-400 dark:border-green-800 dark:hover:bg-green-950"
+                                disabled={markingCompleteId === apt.id}
+                                onClick={() => handleMarkCompleted(apt.id)}
+                              >
+                                <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                                {markingCompleteId === apt.id ? 'Completing...' : 'Mark Complete'}
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -1935,6 +2124,43 @@ const DoctorDashboard = () => {
                   </div>
                   <div className="space-y-2 flex-1 flex flex-col">
                     <label className="block text-xs font-medium text-muted-foreground">Consultation Notes</label>
+                    {selectedAppointmentId && (() => {
+                      const apt = allAppointments.find(a => a.id === selectedAppointmentId);
+                      if (apt && apt.medical_forms && apt.medical_forms.length > 0) {
+                        const filledForms = apt.medical_forms.filter((f: any) => f.status !== 'pending' && f.data);
+                        if (filledForms.length > 0) {
+                          return (
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {filledForms.map((form: any) => {
+                                const label = form.form_type === 'male_fertility' ? 'Male Fertility Questionnaire' :
+                                  form.form_type === 'female_fertility' ? 'Female Fertility Questionnaire' :
+                                  form.form_type === 'couple_fertility' ? 'Couple Fertility Questionnaire' :
+                                  'Medical Questionnaire';
+                                return (
+                                  <div key={form.id} className="flex gap-2">
+                                    <button
+                                      onClick={() => setViewingForm(form)}
+                                      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
+                                    >
+                                      <ClipboardList className="w-3.5 h-3.5" />
+                                      View {label}
+                                    </button>
+                                    <button
+                                      onClick={() => generateFormPDF(form)}
+                                      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 transition-colors"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                      Download PDF
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
                     <textarea 
                       className="flex min-h-[180px] w-full flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none leading-relaxed"
                       placeholder="Enter patient symptoms, diagnosis, and treatment plan..."
@@ -2139,6 +2365,17 @@ const DoctorDashboard = () => {
             <div className="text-center py-8 text-muted-foreground text-sm">No responses recorded in this questionnaire.</div>
           )}
         </ScrollArea>
+
+        {/* Download PDF Button */}
+        <div className="pt-4 border-t border-border mt-2 flex justify-end">
+          <Button
+            onClick={() => generateFormPDF(viewingForm)}
+            className="gap-2 bg-slate-900 hover:bg-slate-800 text-white"
+          >
+            <Download className="w-4 h-4" />
+            Download PDF
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
     </>

@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { ThemeProvider } from "next-themes";
 import { supabase } from "@/integrations/supabase/client";
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '@/integrations/firebase/client';
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { PatientNav } from "@/components/patient-dashboard/PatientNav";
@@ -61,6 +63,9 @@ const PatientDashboard = () => {
   // Booking Modal State
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [bookingType, setBookingType] = useState<string | null>(null);
+  
+  // Rebooking State
+  const [rebookingAppointment, setRebookingAppointment] = useState<any>(null);
 
   // History Modal State
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -72,6 +77,13 @@ const PatientDashboard = () => {
 
   const handleOpenBooking = (type: string = 'online') => {
     setBookingType(type);
+    setRebookingAppointment(null);
+    setIsBookingModalOpen(true);
+  };
+
+  const handleRebook = (appointment: any) => {
+    setRebookingAppointment(appointment);
+    setBookingType(appointment.type || 'online');
     setIsBookingModalOpen(true);
   };
 
@@ -207,18 +219,67 @@ const PatientDashboard = () => {
     fetchAppointments();
   }, [fetchAppointments]);
 
+  // Real-time listener: when a doctor marks an appointment as 'completed',
+  // automatically move it from Upcoming to Appointment History.
+  const prevStatusMapRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const q = query(
+      collection(db, 'appointments'),
+      where('patient_id', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let needsRefetch = false;
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'modified') {
+          const data = change.doc.data();
+          const prevStatus = prevStatusMapRef.current[change.doc.id];
+          if (prevStatus && prevStatus !== data.status && data.status === 'completed') {
+            toast('Appointment completed', {
+              description: 'A doctor has completed your appointment. Check your Appointment History.',
+            });
+          }
+          prevStatusMapRef.current[change.doc.id] = data.status;
+          needsRefetch = true;
+        }
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          prevStatusMapRef.current[change.doc.id] = data.status;
+        }
+      });
+
+      if (needsRefetch) {
+        fetchAppointments();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid, fetchAppointments]);
+
   const fetchNotifications = useCallback(async () => {
     if (!user?.uid) return;
     try {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      const { data: recentAppointments, error } = await supabase
+      const { data: allAppointments, error } = await supabase
         .from('appointments')
         .select('*')
-        .eq('patient_id', user.uid)
-        .gte('created_at', sevenDaysAgo.toISOString())
-        .order('created_at', { ascending: false });
+        .eq('patient_id', user.uid);
+
+      // Client side filter and sort to handle records missing created_at
+      const recentAppointments = (allAppointments || []).filter(apt => {
+        if (!apt.created_at) return true; // Include legacy records
+        return new Date(apt.created_at).getTime() >= sevenDaysAgo.getTime();
+      }).sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : new Date(a.scheduled_at).getTime();
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.scheduled_at).getTime();
+        return bTime - aTime;
+      });
 
       if (error) throw error;
 
@@ -235,7 +296,7 @@ const PatientDashboard = () => {
           const time = formatTime(apt.scheduled_at);
 
           let message = '';
-          let type: string = apt.status;
+          const type: string = apt.status;
 
           switch (apt.status) {
             case 'confirmed': message = `${doctorName} confirmed your appointment for ${date} at ${time}`; break;
@@ -257,12 +318,20 @@ const PatientDashboard = () => {
       );
 
       // Fetch medical_forms separately
-      const { data: formsData, error: formsError } = await supabase
+      const { data: allFormsData, error: formsError } = await supabase
         .from('medical_forms')
         .select('*')
-        .eq('patient_id', user.uid)
-        .gte('created_at', sevenDaysAgo.toISOString())
-        .order('created_at', { ascending: false });
+        .eq('patient_id', user.uid);
+
+      // Client side filter and sort to handle records missing created_at
+      const formsData = (allFormsData || []).filter(form => {
+        if (!form.created_at) return true; // Include legacy records
+        return new Date(form.created_at).getTime() >= sevenDaysAgo.getTime();
+      }).sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
 
       if (formsError) {
         console.error("Error fetching medical forms", formsError);
@@ -529,6 +598,7 @@ const PatientDashboard = () => {
               onOpenHistory={() => setIsHistoryModalOpen(true)}
               formatDate={formatDate}
               formatTime={formatTime}
+              onRebook={handleRebook}
             />
           </div>
           <div>
@@ -554,6 +624,7 @@ const PatientDashboard = () => {
         patientName={fullName}
         patientPhone={profileData.phone}
         patientEmail={user?.email}
+        rebookingAppointment={rebookingAppointment}
       />
 
       <PatientAppointmentHistoryModal
@@ -562,6 +633,7 @@ const PatientDashboard = () => {
         appointments={pastAppointments}
         formatDate={formatDate}
         formatTime={formatTime}
+        onRebook={handleRebook}
       />
 
       {/* Edit Profile Dialog */}

@@ -27,8 +27,7 @@ export default function Index() {
         const { data, error } = await supabase
           .from('awareness_campaigns')
           .select('*')
-          .eq('status', 'active')
-          .order('created_at', { ascending: false });
+          .in('status', ['active', 'scheduled']);
 
         if (data && !error) {
           let validCampaign = null;

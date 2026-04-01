@@ -23,6 +23,7 @@ import { DoctorCalendarView } from "@/components/admin/DoctorCalendarView";
 import { generateReport } from "@/utils/reportGenerator";
 import { supabase } from "@/integrations/supabase/client";
 import { db, app } from "@/integrations/firebase/client";
+import { sendEmail } from "@/lib/emailService";
 import { initializeApp, deleteApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { collection, query, where, getDocs, doc, deleteDoc, orderBy, limit, updateDoc, setDoc } from "firebase/firestore";
@@ -231,16 +232,19 @@ const AdminDashboard = () => {
   const fetchMessageLogs = async () => {
     try {
       setLoadingMessages(true);
+      // Fetch all logs & sort client-side — avoids Firestore silently omitting
+      // docs that don't have 'sent_at', and the shim doesn't support JOIN syntax.
       const { data, error } = await supabase
         .from('message_logs')
-        .select(`
-              *,
-              sender:profiles!message_logs_sender_id_fkey(first_name, last_name, email)
-            `)
-        .order('sent_at', { ascending: false });
+        .select('*');
 
       if (error) throw error;
-      setMessageLogs(data || []);
+      const sorted = (data || []).sort((a: any, b: any) => {
+        const aTime = a.sent_at ? new Date(a.sent_at).getTime() : 0;
+        const bTime = b.sent_at ? new Date(b.sent_at).getTime() : 0;
+        return bTime - aTime;
+      });
+      setMessageLogs(sorted);
     } catch (err: any) {
       console.error('Error fetching message logs:', err);
       toast({
@@ -256,6 +260,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (activeTab === "campaigns") {
       setIsCampaignModalOpen(false);
+      fetchCampaigns();
     } else if (activeTab === "communication") {
       fetchMessageLogs();
     }
@@ -276,34 +281,111 @@ const AdminDashboard = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      const { error } = await supabase.from('message_logs').insert([{
-        sender_id: session.user.id,
+      // ── 1. Fetch the right group of patients from Firestore ──────────────
+      const SMS_API_URL = import.meta.env.VITE_SMS_API_URL;
+      let recipients: { name: string; email?: string; phone?: string }[] = [];
+
+      const usersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'patient')));
+      const allPatients = usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+      if (messageRecipient === 'all') {
+        recipients = allPatients;
+      } else if (messageRecipient === 'today') {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const apptSnap = await getDocs(
+          query(collection(db, 'appointments'), where('date', '==', todayStr))
+        );
+        const patientIds = new Set(apptSnap.docs.map(d => d.data().patientId));
+        recipients = allPatients.filter((p: any) => patientIds.has(p.id));
+      } else {
+        // gynae / fertility — filter by specialty on appointments
+        const specialtyKeyword = messageRecipient === 'gynae' ? 'Gynae' : 'Fertility';
+        const apptSnap = await getDocs(collection(db, 'appointments'));
+        const patientIds = new Set(
+          apptSnap.docs
+            .filter(d => (d.data().specialty || '').toLowerCase().includes(specialtyKeyword.toLowerCase()))
+            .map(d => d.data().patientId)
+        );
+        recipients = allPatients.filter((p: any) => patientIds.has(p.id));
+      }
+
+      if (recipients.length === 0) {
+        toast({ title: "No recipients", description: "No patients found in the selected group.", variant: "destructive" });
+        setIsSendingMessage(false);
+        return;
+      }
+
+      // ── 2. Dispatch SMS or Email to each recipient ───────────────────────
+      let successCount = 0;
+      let failCount = 0;
+
+      await Promise.allSettled(
+        recipients.map(async (patient: any) => {
+          try {
+            if (messageType === 'SMS') {
+              const phone = patient.phone || patient.phoneNumber || patient.phone_number;
+              if (!phone) { failCount++; return; }
+              if (!SMS_API_URL) { failCount++; return; }
+              const res = await fetch(SMS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone, message: messageContent.trim() }),
+              });
+              if (res.ok) successCount++; else failCount++;
+            } else {
+              // Email
+              const email = patient.email;
+              if (!email) { failCount++; return; }
+              const name = patient.full_name || `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || 'Patient';
+              const result = await sendEmail('bulk_message', {
+                to: email,
+                subject: `Message from St. Gamaliel's Hospital`,
+                message: messageContent.trim(),
+                patientName: name,
+              });
+              if (result.error) failCount++; else successCount++;
+            }
+          } catch {
+            failCount++;
+          }
+        })
+      );
+
+      // ── 3. Save log to Firestore ─────────────────────────────────────────
+      const status = failCount === 0 ? 'sent' : successCount === 0 ? 'failed' : 'partial';
+      await supabase.from('message_logs').insert([{
+        sender_id: session.user.uid,
         recipient_group: messageRecipient,
         message_type: messageType,
         content: messageContent.trim(),
-        status: 'sent'
+        status,
+        recipients_count: recipients.length,
+        sent_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
       }]);
 
-      if (error) throw error;
+      const desc = failCount === 0
+        ? `${messageType} sent to ${successCount} recipient${successCount !== 1 ? 's' : ''} successfully!`
+        : `Sent to ${successCount}, failed for ${failCount} recipient(s).`;
 
       toast({
-        title: "Success",
-        description: `${messageType} sent to ${messageRecipient} successfully!`
+        title: failCount === 0 ? "Success" : "Partially sent",
+        description: desc,
+        variant: failCount > 0 && successCount === 0 ? "destructive" : "default",
       });
 
       setMessageContent('');
       setMessageRecipient('');
 
-      // Refresh logs
+      // Refresh message history
       setLoadingMessages(true);
-      const { data } = await supabase
-        .from('message_logs')
-        .select(`
-          *,
-          sender:profiles!message_logs_sender_id_fkey(first_name, last_name, email)
-        `)
-        .order('sent_at', { ascending: false });
-      setMessageLogs(data || []);
+      const { data } = await supabase.from('message_logs').select('*');
+      const sortedLogs = (data || []).sort((a: any, b: any) => {
+        const aTime = a.sent_at ? new Date(a.sent_at).getTime() : 0;
+        const bTime = b.sent_at ? new Date(b.sent_at).getTime() : 0;
+        return bTime - aTime;
+      });
+      setMessageLogs(sortedLogs);
       setLoadingMessages(false);
 
     } catch (err: any) {
@@ -375,7 +457,8 @@ const AdminDashboard = () => {
             scheduled_date: newCampaign.scheduleDate,
             duration: parseInt(newCampaign.duration),
             duration_unit: newCampaign.durationUnit,
-            status: 'scheduled'
+            status: 'scheduled',
+            created_at: new Date().toISOString(),
           }
         ]);
 
@@ -392,14 +475,8 @@ const AdminDashboard = () => {
       resetCampaignForm();
       setIsCampaignModalOpen(false);
 
-      // Refresh campaigns list
-      const { data: updatedCampaigns } = await supabase
-        .from('awareness_campaigns')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (updatedCampaigns) {
-        setCampaigns(updatedCampaigns);
-      }
+      // Refresh campaigns list using the shared fetch function (avoids orderBy issue)
+      await fetchCampaigns();
 
     } catch (error: any) {
       console.error('Error creating campaign:', error);
@@ -451,13 +528,21 @@ const AdminDashboard = () => {
 
   const fetchCampaigns = async () => {
     try {
+      setLoadingCampaigns(true);
+      // NOTE: Do NOT use .order('created_at') here — Firestore silently omits
+      // documents that are missing the ordered field. Fetch all and sort client-side.
       const { data, error } = await supabase
         .from('awareness_campaigns')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
 
       if (error) throw error;
-      setCampaigns(data || []);
+      // Sort by created_at descending client-side
+      const sorted = (data || []).sort((a: any, b: any) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
+      setCampaigns(sorted);
     } catch (error) {
       console.error('Error fetching campaigns:', error);
     } finally {
@@ -518,13 +603,19 @@ const AdminDashboard = () => {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-        const { data: pendingAppointments } = await supabase
+        const { data: allPendingAppointments } = await supabase
           .from('appointments')
           .select('id, patient_id, doctor_id, type, scheduled_at, status, created_at')
-          .eq('status', 'pending')
-          .gte('created_at', sevenDaysAgo.toISOString())
-          .order('created_at', { ascending: false })
-          .limit(10);
+          .eq('status', 'pending');
+
+        const pendingAppointments = (allPendingAppointments || [])
+          .filter((apt: any) => !apt.created_at || new Date(apt.created_at).getTime() >= sevenDaysAgo.getTime())
+          .sort((a: any, b: any) => {
+            const aTime = a.created_at ? new Date(a.created_at).getTime() : new Date(a.scheduled_at).getTime();
+            const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.scheduled_at).getTime();
+            return bTime - aTime;
+          })
+          .slice(0, 10);
 
         if (pendingAppointments) {
           for (const apt of pendingAppointments) {
@@ -553,13 +644,19 @@ const AdminDashboard = () => {
         const oneDayAgo = new Date();
         oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
-        const { data: confirmedAppointments } = await supabase
+        const { data: allConfirmedAppointments } = await supabase
           .from('appointments')
-          .select('id, patient_id, status, created_at')
-          .eq('status', 'confirmed')
-          .gte('created_at', oneDayAgo.toISOString())
-          .order('created_at', { ascending: false })
-          .limit(5);
+          .select('id, patient_id, status, created_at, scheduled_at')
+          .eq('status', 'confirmed');
+
+        const confirmedAppointments = (allConfirmedAppointments || [])
+          .filter((apt: any) => !apt.created_at || new Date(apt.created_at).getTime() >= oneDayAgo.getTime())
+          .sort((a: any, b: any) => {
+            const aTime = a.created_at ? new Date(a.created_at).getTime() : new Date(a.scheduled_at).getTime();
+            const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.scheduled_at).getTime();
+            return bTime - aTime;
+          })
+          .slice(0, 5);
 
         if (confirmedAppointments) {
           for (const apt of confirmedAppointments) {
@@ -588,13 +685,17 @@ const AdminDashboard = () => {
         // 3. Get new patient registrations (last 7 days)
         const newPatientsQ = query(
           collection(db, 'users'),
-          where('role', '==', 'patient'),
-          where('created_at', '>=', sevenDaysAgo.toISOString())
+          where('role', '==', 'patient')
         );
         const newPatientsSnap = await getDocs(newPatientsQ);
         const newPatients = newPatientsSnap.docs
           .map(d => ({ id: d.id, ...d.data() as any }))
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .filter(p => !p.created_at || new Date(p.created_at).getTime() >= sevenDaysAgo.getTime())
+          .sort((a, b) => {
+            const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return bTime - aTime;
+          })
           .slice(0, 5);
 
         for (const patient of newPatients) {
@@ -669,13 +770,18 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     const loadAppointments = async () => {
+      // NOTE: Do NOT use .order("created_at") here — Firestore silently omits
+      // documents that are missing the ordered field. Fetch all and sort client-side.
       const { data: appts } = await supabase
         .from("appointments" as any)
-        .select("id, patient_id, doctor_id, type, clinic, scheduled_at, status, payment_status, symptoms, location")
-        .order("created_at", { ascending: false });
-      const rows = (appts as any[]) || [];
-      const patientIds = Array.from(new Set(rows.map(a => a.patient_id).filter(Boolean)));
-      const doctorIds = Array.from(new Set(rows.map(a => a.doctor_id).filter(Boolean)));
+        .select("id, patient_id, doctor_id, type, clinic, scheduled_at, status, payment_status, symptoms, location, created_at");
+      const rows = ((appts as any[]) || []).sort((a: any, b: any) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : new Date(a.scheduled_at || 0).getTime();
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.scheduled_at || 0).getTime();
+        return bTime - aTime; // descending
+      });
+      const patientIds = Array.from(new Set(rows.map((a: any) => a.patient_id).filter(Boolean)));
+      const doctorIds = Array.from(new Set(rows.map((a: any) => a.doctor_id).filter(Boolean)));
       const [{ data: patientProfiles }, { data: doctorProfiles }] = await Promise.all([
         patientIds.length ? supabase.from("profiles").select("id, full_name, phone").in("id", patientIds) : Promise.resolve({ data: [] as any }),
         doctorIds.length ? supabase.from("profiles").select("id, full_name").in("id", doctorIds) : Promise.resolve({ data: [] as any }),
@@ -705,6 +811,7 @@ const AdminDashboard = () => {
     };
     loadAppointments();
   }, []);
+
 
   const todayAppointmentsCount = useMemo(() => {
     const today = new Date();

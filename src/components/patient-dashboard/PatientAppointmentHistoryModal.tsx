@@ -7,6 +7,7 @@ interface PatientAppointmentHistoryModalProps {
   appointments: any[];
   formatDate: (timestamp: string) => string;
   formatTime: (timestamp: string) => string;
+  onRebook: (appointment: any) => void;
 }
 
 export const PatientAppointmentHistoryModal = ({
@@ -14,7 +15,8 @@ export const PatientAppointmentHistoryModal = ({
   onClose,
   appointments,
   formatDate,
-  formatTime
+  formatTime,
+  onRebook
 }: PatientAppointmentHistoryModalProps) => {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -132,14 +134,17 @@ export const PatientAppointmentHistoryModal = ({
                               <p className="text-xs text-slate-500 mt-0.5">{doctorName}</p>
                             </div>
                           </div>
-                          
                           {isCancelled ? (
                              <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-medium uppercase tracking-wider">
                                Cancelled
                              </span>
-                          ) : (
+                          ) : apt.status === 'completed' ? (
                              <span className="inline-flex items-center px-2 py-1 rounded-md bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[10px] font-medium uppercase tracking-wider">
                                Completed
+                             </span>
+                          ) : (
+                             <span className="inline-flex items-center px-2 py-1 rounded-md bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-medium uppercase tracking-wider">
+                               Missed
                              </span>
                           )}
                         </div>
@@ -150,13 +155,34 @@ export const PatientAppointmentHistoryModal = ({
                             </p>
                             <p className="text-xs text-slate-500 mt-0.5">{formatTime(apt.scheduled_at)}</p>
                           </div>
-                          <button 
-                             className={`text-sm font-medium flex items-center gap-1.5 transition-colors ${isCancelled ? 'text-slate-400 cursor-not-allowed' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'}`}
-                             disabled={isCancelled}
-                          >
-                            Details
-                            <Icon icon="solar:alt-arrow-right-linear" className="text-base" />
-                          </button>
+                          <div className="flex items-center gap-3">
+                              {(() => {
+                                  const appointmentTime = new Date(apt.scheduled_at).getTime();
+                                  const isPassed1Hour = Date.now() > appointmentTime + 60 * 60 * 1000;
+                                  const isWithin3Months = Date.now() <= appointmentTime + 90 * 24 * 60 * 60 * 1000;
+                                  const canRebook = apt.payment_status === 'paid' && apt.status !== 'completed' && isPassed1Hour && isWithin3Months;
+
+                                  return canRebook && (
+                                      <button 
+                                        className="text-sm font-medium flex items-center gap-1.5 transition-colors text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onRebook(apt);
+                                        }}
+                                      >
+                                          Rebook <Icon icon="solar:calendar-linear" className="text-base" />
+                                      </button>
+                                  );
+                              })()}
+                              
+                              <button 
+                                 className={`text-sm font-medium flex items-center gap-1.5 transition-colors ${isCancelled ? 'text-slate-400 cursor-not-allowed' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'}`}
+                                 disabled={isCancelled}
+                              >
+                                Details
+                                <Icon icon="solar:alt-arrow-right-linear" className="text-base" />
+                              </button>
+                          </div>
                         </div>
                       </div>
                     );

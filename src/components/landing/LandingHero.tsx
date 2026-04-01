@@ -192,12 +192,12 @@ export function LandingHero({ onBookClick, onContactClick, isServicesMenuOpen, t
 
         {/* Hero Main Text */}
         <div key={currentSlide} className="relative z-10 flex flex-col md:flex-row justify-between items-end mt-24 md:mt-0 md:absolute md:top-1/2 md:-translate-y-1/2 left-6 sm:left-10 lg:left-12 right-6 sm:right-10 lg:right-12 animate-fade-in">
-          <h1
-            className="font-medium text-white tracking-tighter leading-[1.05] uppercase max-w-3xl drop-shadow-sm whitespace-pre-line"
-            style={{ fontSize: 'clamp(1.8rem, 5.5vw, 5rem)' }}
+          <h3
+            className="font-medium text-white tracking-tighter leading-[1.1] uppercase max-w-2xl drop-shadow-sm whitespace-pre-line"
+            style={{ fontSize: 'clamp(1.5rem, 3.5vw, 2.25rem)' }}
           >
             {activeSlide.title}
-          </h1>
+          </h3>
           <div className="max-w-xs mt-8 md:mt-0 text-white md:pb-6">
             <p className="text-lg font-normal leading-relaxed text-white/90 drop-shadow-sm">
               {activeSlide.subtitle}

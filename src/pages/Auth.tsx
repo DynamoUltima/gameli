@@ -3,6 +3,7 @@ import { sendEmail } from "@/lib/emailService";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { auth, db } from "@/integrations/firebase/client";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updatePassword, onAuthStateChanged } from "firebase/auth";
+import { getFirebaseErrorMessage } from "@/lib/firebaseErrors";
 import { doc, setDoc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -223,7 +224,7 @@ const Auth = () => {
       });
     } catch (error: any) {
       console.error("Registration error:", error);
-      toast.error(error.message || "Failed to register. Please try again.");
+      toast.error(getFirebaseErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
@@ -248,7 +249,7 @@ const Auth = () => {
       setResetEmail("");
     } catch (error: any) {
       console.error("Password reset error:", error);
-      toast.error(error.message || "Failed to send reset email. Please try again.");
+      toast.error(getFirebaseErrorMessage(error));
     } finally {
       setResetLoading(false);
     }
@@ -286,7 +287,7 @@ const Auth = () => {
       navigate('/auth');
     } catch (error: any) {
       console.error("Password update error:", error);
-      toast.error(error.message || "Failed to update password. Please try again.");
+      toast.error(getFirebaseErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
@@ -333,7 +334,7 @@ const Auth = () => {
       }, 500);
     } catch (error: any) {
       console.error("Login error:", error);
-      toast.error(error.message || "Invalid credentials. Please try again.");
+      toast.error(getFirebaseErrorMessage(error));
     } finally {
       setIsLoading(false);
     }

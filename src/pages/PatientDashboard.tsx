@@ -452,7 +452,7 @@ const PatientDashboard = () => {
       setEditProfileOpen(false);
     } catch (error: any) {
       console.error('Error updating profile:', error);
-      toast.error(error.message || "Failed to update profile");
+      toast.error("We couldn't save your changes. Please try again.");
     } finally {
       setEditingProfile(false);
     }
@@ -543,7 +543,7 @@ const PatientDashboard = () => {
       ));
     } catch (error: any) {
       console.error('Error submitting form:', error);
-      toast.error(error.message || "Failed to submit form");
+      toast.error("We couldn't submit your form. Please try again or contact the hospital.");
     } finally {
       setIsSubmittingForm(false);
     }

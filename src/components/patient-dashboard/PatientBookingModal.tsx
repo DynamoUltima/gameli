@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { sendEmail } from "@/lib/emailService";
 import { sendSms } from "@/lib/smsService";
+import { getFirebaseErrorMessage } from "@/lib/firebaseErrors";
 import {
     X,
     CheckCircle,
@@ -122,8 +123,8 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
             } catch (error: any) {
                 console.error("Error fetching availability:", error);
                 toast({
-                    title: "Error fetching schedule",
-                    description: error.message,
+                    title: "Could not load doctor's schedule",
+                    description: "We couldn't fetch the doctor's available slots. Please try again or select a different doctor.",
                     variant: "destructive",
                 });
             } finally {
@@ -317,9 +318,10 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                 onBookingSuccess?.();
             }
         } catch (error: any) {
+            console.error("Booking error:", error);
             toast({
                 title: "Booking Failed",
-                description: error.message || "An error occurred while booking.",
+                description: getFirebaseErrorMessage(error),
                 variant: "destructive",
             });
         } finally {

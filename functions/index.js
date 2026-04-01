@@ -1,10 +1,12 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+
+const sendgridApiKey = defineSecret("SENDGRID_API_KEY");
 
 const SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send";
 const SENDER_EMAIL = "support@gamalielshospital.com";
 const SENDER_NAME = "St. Gamaliel's Hospital";
 const HOSPITAL_NAME = "St. Gamaliel's Hospital";
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 
 // ─── SMS Function ─────────────────────────────────────────────────────────────
 
@@ -208,7 +210,8 @@ function getEmailContent(type, data) {
 
 // ─── Email Function ───────────────────────────────────────────────────────────
 
-exports.sendEmail = onRequest({ cors: true, region: "europe-west1", invoker: "public" }, async (request, response) => {
+exports.sendEmail = onRequest({ cors: true, region: "europe-west1", invoker: "public", secrets: [sendgridApiKey] }, async (request, response) => {
+  const SENDGRID_API_KEY = sendgridApiKey.value();
   if (request.method !== "POST") {
     response.status(405).send("Method Not Allowed");
     return;

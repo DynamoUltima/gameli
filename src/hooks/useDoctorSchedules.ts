@@ -101,7 +101,7 @@ export const useDoctorSchedules = (doctorId?: string) => {
 
   // Get available time slots for a doctor on a specific day
   // Note: doctorId here is the user_id (from profiles/auth.users)
-  const getAvailableSlots = useCallback(async (doctorId: string, date: Date): Promise<string[]> => {
+  const getAvailableSlots = useCallback(async (doctorId: string, date: Date, bookingType?: string | null): Promise<string[]> => {
     try {
       console.log('Getting available slots for doctor:', doctorId, 'on date:', date);
       
@@ -113,7 +113,7 @@ export const useDoctorSchedules = (doctorId?: string) => {
       // Fetch all slots and filter locally to handle both date-specific and day-specific slots
       const { data: rawSlots, error: availabilityError } = await supabase
         .from('doctor_availability')
-        .select('start_time, end_time, day_of_week, date')
+        .select('start_time, end_time, day_of_week, date, visit_type')
         .eq('doctor_id', doctorId);
       
       if (availabilityError) {
@@ -125,9 +125,16 @@ export const useDoctorSchedules = (doctorId?: string) => {
           availabilitySlots = rawSlots?.filter(slot => !slot.date && slot.day_of_week === dayOfWeek) || [];
       }
       
+      if (bookingType) {
+        availabilitySlots = availabilitySlots.filter(slot => {
+          const slotType = slot.visit_type || 'hospital';
+          return slotType === bookingType;
+        });
+      }
+      
       // If no availability is set for this day, doctor doesn't work on this day
       if (!availabilitySlots || availabilitySlots.length === 0) {
-        console.log('No availability set for', dayOfWeek, '- doctor does not work on this day');
+        console.log('No availability set for', dayOfWeek, '- doctor does not work on this day / no slots for this booking type');
         return [];
       }
       

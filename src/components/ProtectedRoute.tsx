@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserRole, UserRole } from '@/hooks/useUserRole';
 
@@ -12,11 +12,12 @@ export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) 
   const { user, loading: authLoading } = useAuth(true);
   const { role, loading: roleLoading } = useUserRole(user?.uid);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     if (!authLoading && !roleLoading) {
       if (!user) {
-        navigate('/auth');
+        navigate(`/auth?redirect=${encodeURIComponent(location.pathname + location.search)}`);
         return;
       }
 

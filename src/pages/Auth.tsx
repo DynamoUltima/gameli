@@ -69,7 +69,7 @@ const Auth = () => {
   useEffect(() => {
     if (currentUserId && !roleLoading && role && !isLoading) {
       const getDashboardPath = () => {
-        if (redirectTo && redirectTo !== "/" && redirectTo.includes("/book/")) {
+        if (redirectTo && redirectTo !== "/" && (redirectTo.startsWith("/book/") || redirectTo.startsWith("/dashboard/"))) {
           return redirectTo;
         }
         switch (role) {
@@ -316,7 +316,7 @@ const Auth = () => {
       toast.success("Login successful! Redirecting...");
 
       setTimeout(() => {
-        if (redirectTo && redirectTo !== "/" && redirectTo.includes("/book/")) {
+        if (redirectTo && redirectTo !== "/" && (redirectTo.startsWith("/book/") || redirectTo.startsWith("/dashboard/"))) {
           navigate(redirectTo);
         } else {
           switch (role) {

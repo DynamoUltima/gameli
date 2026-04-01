@@ -142,7 +142,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                 return;
             }
             try {
-                const slots = await getAvailableSlots(preferredDoctor, selectedDate);
+                const slots = await getAvailableSlots(preferredDoctor, selectedDate, bookingType);
                 const formattedTimes = slots.map(slot => format(new Date(slot), 'hh:mm a'));
                 
                 setAvailableTimes(formattedTimes);
@@ -158,7 +158,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
 
         fetchTimes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedDate, preferredDoctor, getAvailableSlots]);
+    }, [selectedDate, preferredDoctor, getAvailableSlots, bookingType]);
 
     const processBookingSuccess = async (paymentReference?: any) => {
         setIsSubmitting(true);
@@ -902,7 +902,8 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                                 const dayOfWeek = format(date, 'EEEE').toLowerCase();
                                                 
                                                 const hasSlot = availabilitySlots.some(slot => 
-                                                    slot.date === dateStr || (!slot.date && slot.day_of_week === dayOfWeek)
+                                                    (slot.date === dateStr || (!slot.date && slot.day_of_week === dayOfWeek)) &&
+                                                    (!bookingType || (slot.visit_type || 'hospital') === bookingType)
                                                 );
                                                 return !hasSlot;
                                             }}
@@ -1081,7 +1082,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                     <div className="flex justify-between items-center">
                                         <span className="text-sm text-slate-500 dark:text-slate-400">Receipt No.</span>
                                         <span className="text-sm font-medium text-slate-900 dark:text-white font-mono">
-                                            {bookedAppointmentId ? `#RCP-${bookedAppointmentId.slice(-6).toUpperCase()}` : '#RCP-000000'}
+                                            {bookedAppointmentId ? `#GAM-${bookedAppointmentId.slice(-6).toUpperCase()}` : '#GAM-000000'}
                                         </span>
                                     </div>
                                 </div>
@@ -1089,7 +1090,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        const receiptNo = bookedAppointmentId ? `#RCP-${bookedAppointmentId.slice(-6).toUpperCase()}` : '#RCP-000000';
+                                        const receiptNo = bookedAppointmentId ? `#GAM-${bookedAppointmentId.slice(-6).toUpperCase()}` : '#GAM-000000';
                                         const serviceLabel = bookingType ? bookingType.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase()) + ' Booking' : 'Booking';
                                         const dateTimeLabel = `${selectedDate ? format(selectedDate, 'MMM do, yyyy') : ''}${selectedTime ? ', ' + selectedTime : ''}`;
                                         const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt ${receiptNo}</title><style>

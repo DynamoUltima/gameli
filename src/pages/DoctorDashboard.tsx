@@ -52,6 +52,7 @@ const DoctorDashboard = () => {
   const [availabilitySlots, setAvailabilitySlots] = useState<any[]>([]);
   const [newSlotStart, setNewSlotStart] = useState("09:00");
   const [newSlotEnd, setNewSlotEnd] = useState("17:00");
+  const [newSlotType, setNewSlotType] = useState<"hospital" | "online" | "home">("hospital");
   const [recurrence, setRecurrence] = useState("specific");
   const [isAddingSlot, setIsAddingSlot] = useState(false);
 
@@ -524,7 +525,8 @@ const DoctorDashboard = () => {
         day_of_week: selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
         date: getDateString(selectedDate),
         start_time: startStr,
-        end_time: endStr
+        end_time: endStr,
+        visit_type: newSlotType
       });
     } else if (recurrence === "week") {
       // Every day this week (Sun-Sat of the week containing selectedDate)
@@ -541,7 +543,8 @@ const DoctorDashboard = () => {
           day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
           date: getDateString(currentDate),
           start_time: startStr,
-          end_time: endStr
+          end_time: endStr,
+          visit_type: newSlotType
         });
       }
     } else if (recurrence === "month_day") {
@@ -557,7 +560,8 @@ const DoctorDashboard = () => {
             day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
             date: getDateString(currentDate),
             start_time: startStr,
-            end_time: endStr
+            end_time: endStr,
+            visit_type: newSlotType
           });
         }
       }
@@ -571,7 +575,8 @@ const DoctorDashboard = () => {
           day_of_week: currentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase(),
           date: getDateString(currentDate),
           start_time: startStr,
-          end_time: endStr
+          end_time: endStr,
+          visit_type: newSlotType
         });
       }
     }
@@ -1803,19 +1808,32 @@ const DoctorDashboard = () => {
                       const isSelected = displayDate.toDateString() === selectedDate.toDateString();
                       const displayDateStr = getDateString(displayDate);
                       const displayDayName = displayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-                      const hasAvailability = availabilitySlots.some(slot => 
+                      const slotsForDay = availabilitySlots.filter(slot => 
                         slot.date === displayDateStr || (!slot.date && slot.day_of_week === displayDayName)
                       );
+                      const hasAvailability = slotsForDay.length > 0;
+                      const uniqueVisitTypes = Array.from(new Set(slotsForDay.map(s => s.visit_type || 'hospital')));
                       
                       return (
                         <div 
                           key={i} 
                           onClick={() => setSelectedDate(displayDate)}
-                          className={`aspect-square flex flex-col justify-center items-center gap-[2px] text-xs font-medium rounded cursor-pointer transition-colors ${isSelected ? 'text-primary-foreground bg-primary shadow-sm' : hasAvailability ? 'text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'}`}
+                          className={`aspect-square flex flex-col justify-center items-center gap-[2px] text-xs font-medium rounded cursor-pointer transition-colors ${isSelected ? 'text-primary-foreground bg-primary shadow-sm' : hasAvailability ? 'text-primary bg-primary/5 hover:bg-primary/10 border border-primary/10' : 'text-muted-foreground hover:bg-muted'}`}
                         >
                           <span>{displayDate.getDate()}</span>
                           {hasAvailability && (
-                            <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-primary-foreground' : 'bg-primary'}`}></span>
+                            <div className="flex gap-[2px]">
+                              {uniqueVisitTypes.map((vType, idx) => {
+                                let dotColor = 'bg-primary';
+                                if (!isSelected) {
+                                  if (vType === 'online') dotColor = 'bg-blue-500';
+                                  else if (vType === 'home') dotColor = 'bg-emerald-500';
+                                } else {
+                                  dotColor = 'bg-primary-foreground/90';
+                                }
+                                return <span key={idx} className={`w-1 h-1 rounded-full ${dotColor}`}></span>;
+                              })}
+                            </div>
                           )}
                         </div>
                       )
@@ -1863,6 +1881,15 @@ const DoctorDashboard = () => {
                           <div className="flex items-center gap-2">
                             <Clock className="w-4 h-4 text-muted-foreground" />
                             <span className="text-sm font-medium">{formatTimeStr(slot.start_time)} - {formatTimeStr(slot.end_time)}</span>
+                            {slot.visit_type && (
+                              <span className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-medium capitalize ml-1 border ${
+                                slot.visit_type === 'online' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' :
+                                slot.visit_type === 'home' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800' :
+                                'bg-primary/10 text-primary border-primary/20'
+                              }`}>
+                                {slot.visit_type === 'home' ? 'Home Visit' : slot.visit_type}
+                              </span>
+                            )}
                             {isBooked && (
                               <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
                                 Booked
@@ -1870,6 +1897,7 @@ const DoctorDashboard = () => {
                             )}
                           </div>
                           <Button 
+
                             variant="ghost" 
                             size="icon" 
                             onClick={() => handleDeleteSlot(slot.id)}
@@ -1894,18 +1922,32 @@ const DoctorDashboard = () => {
                     Add Time Slot &amp; Recurrence
                   </label>
                   <div className="flex flex-col gap-3">
-                    <div className="relative w-full">
-                      <select 
-                        className="w-full bg-background border border-input rounded-lg pl-3 pr-7 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer appearance-none"
-                        value={recurrence}
-                        onChange={(e) => setRecurrence(e.target.value)}
-                      >
-                        <option value="specific">Specific Date ({selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</option>
-                        <option value="week">Every day this Week</option>
-                        <option value="month_day">Every {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })} this Month</option>
-                        <option value="month_all">Every day this Month</option>
-                      </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <div className="flex gap-2 w-full">
+                      <div className="relative flex-1">
+                        <select 
+                          className="w-full bg-background border border-input rounded-lg pl-3 pr-7 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer appearance-none"
+                          value={newSlotType}
+                          onChange={(e) => setNewSlotType(e.target.value as "hospital" | "online" | "home")}
+                        >
+                          <option value="hospital">Hospital Visit</option>
+                          <option value="online">Online Consult</option>
+                          <option value="home">Home Visit</option>
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      </div>
+                      <div className="relative flex-[2]">
+                        <select 
+                          className="w-full bg-background border border-input rounded-lg pl-3 pr-7 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer appearance-none"
+                          value={recurrence}
+                          onChange={(e) => setRecurrence(e.target.value)}
+                        >
+                          <option value="specific">Specific Date ({selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</option>
+                          <option value="week">Every day this Week</option>
+                          <option value="month_day">Every {selectedDate.toLocaleDateString('en-US', { weekday: 'long' })} this Month</option>
+                          <option value="month_all">Every day this Month</option>
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      </div>
                     </div>
                     <div className="flex flex-col xl:flex-row items-center gap-2">
                       <div className="flex-1 relative w-full">
@@ -1965,8 +2007,8 @@ const DoctorDashboard = () => {
                 </div>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Experience:</span>
-                    <span className="font-medium">15 years</span>
+                    <span className="text-muted-foreground">Appointments:</span>
+                    <span className="font-medium">{allAppointments.length}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Rating:</span>

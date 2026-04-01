@@ -874,20 +874,44 @@ const AdminDashboard = () => {
     }).length;
   }, [appointments]);
 
-  // Today's appointments by type
-  const { todayHospitalCount, todayOnlineCount, todayHomeCount } = useMemo(() => {
+  // Appointments by type (Total & Today)
+  const { 
+    totalHospitalCount, todayHospitalCount, 
+    totalOnlineCount, todayOnlineCount, 
+    totalHomeCount, todayHomeCount 
+  } = useMemo(() => {
     const today = new Date();
     const y = today.getFullYear();
     const m = today.getMonth();
     const d = today.getDate();
-    const todayApts = appointments.filter((a) => {
+    
+    let totalHospital = 0, todayHospital = 0;
+    let totalOnline = 0, todayOnline = 0;
+    let totalHome = 0, todayHome = 0;
+
+    appointments.forEach((a) => {
       const dt = new Date(a.scheduledAtISO);
-      return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+      const isToday = dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+      
+      if (a.type === 'hospital') {
+        totalHospital++;
+        if (isToday) todayHospital++;
+      } else if (a.type === 'online') {
+        totalOnline++;
+        if (isToday) todayOnline++;
+      } else if (a.type === 'home') {
+        totalHome++;
+        if (isToday) todayHome++;
+      }
     });
+
     return {
-      todayHospitalCount: todayApts.filter(a => a.type === 'hospital').length,
-      todayOnlineCount: todayApts.filter(a => a.type === 'online').length,
-      todayHomeCount: todayApts.filter(a => a.type === 'home').length,
+      totalHospitalCount: totalHospital,
+      todayHospitalCount: todayHospital,
+      totalOnlineCount: totalOnline,
+      todayOnlineCount: todayOnline,
+      totalHomeCount: totalHome,
+      todayHomeCount: todayHome,
     };
   }, [appointments]);
 
@@ -931,8 +955,11 @@ const AdminDashboard = () => {
   // Revenue state
   const [onlineRevenue, setOnlineRevenue] = useState(0);
   const [homeRevenue, setHomeRevenue] = useState(0);
+  const [hospitalRevenue, setHospitalRevenue] = useState(0);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [paidOnlineCount, setPaidOnlineCount] = useState(0);
+  const [paidHomeCount, setPaidHomeCount] = useState(0);
+  const [paidHospitalCount, setPaidHospitalCount] = useState(0);
 
   useEffect(() => {
     const calculateRevenue = async () => {
@@ -963,8 +990,11 @@ const AdminDashboard = () => {
         // Aggregate revenue by type
         let online = 0;
         let home = 0;
+        let hospital = 0;
         let total = 0;
         let paidOnline = 0;
+        let paidHome = 0;
+        let paidHospital = 0;
 
         rows.forEach((apt: any) => {
           const cost = apt.specialty_id ? (costMap.get(apt.specialty_id) || 0) : 0;
@@ -974,13 +1004,20 @@ const AdminDashboard = () => {
             paidOnline++;
           } else if (apt.type === 'home') {
             home += cost;
+            paidHome++;
+          } else if (apt.type === 'hospital') {
+            hospital += cost;
+            paidHospital++;
           }
         });
 
         setOnlineRevenue(online);
         setHomeRevenue(home);
+        setHospitalRevenue(hospital);
         setTotalRevenue(total);
         setPaidOnlineCount(paidOnline);
+        setPaidHomeCount(paidHome);
+        setPaidHospitalCount(paidHospital);
       } catch (error) {
         console.error('Error calculating revenue:', error);
       }
@@ -2307,7 +2344,7 @@ const AdminDashboard = () => {
           {activeTab === "overview" && (
             <div className="space-y-6">
               {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <Card>
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -2323,7 +2360,27 @@ const AdminDashboard = () => {
                     <div className="space-y-1">
                       <div className="text-3xl font-bold text-foreground">GHS {totalRevenue.toFixed(2)}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">0 paid appointments</span>
+                        <span className="text-muted-foreground">{paidOnlineCount + paidHomeCount + paidHospitalCount} paid appointment{(paidOnlineCount + paidHomeCount + paidHospitalCount) !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Hospital Visit Revenue
+                      </CardTitle>
+                      <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                        <Hospital className="w-5 h-5 text-indigo-500" />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-1">
+                      <div className="text-3xl font-bold text-foreground">GHS {hospitalRevenue.toFixed(2)}</div>
+                      <div className="flex items-center gap-1 text-sm">
+                        <span className="text-muted-foreground">{paidHospitalCount} paid consultation{paidHospitalCount !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -2342,11 +2399,8 @@ const AdminDashboard = () => {
                   <CardContent>
                     <div className="space-y-1">
                       <div className="text-3xl font-bold text-foreground">GHS {homeRevenue.toFixed(2)}</div>
-                      {/* <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Home visit revenue</span>
-                      </div> */}
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">0 paid consultations</span>
+                        <span className="text-muted-foreground">{paidHomeCount} paid consultation{paidHomeCount !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -2365,9 +2419,6 @@ const AdminDashboard = () => {
                   <CardContent>
                     <div className="space-y-1">
                       <div className="text-3xl font-bold text-foreground">GHS {onlineRevenue.toFixed(2)}</div>
-                      {/* <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Online visit revenue</span>
-                      </div> */}
                       <div className="flex items-center gap-1 text-sm">
                         <span className="text-muted-foreground">{paidOnlineCount} paid consultation{paidOnlineCount !== 1 ? 's' : ''}</span>
                       </div>
@@ -2378,7 +2429,7 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex  items-start justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Today's Appointment
+                        Total Hospital Appointments
                       </CardTitle>
 
                       <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
@@ -2388,9 +2439,9 @@ const AdminDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{todayHospitalCount}</div>
+                      <div className="text-3xl font-bold text-foreground">{totalHospitalCount}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Hospital Visit </span>
+                        <span className="text-muted-foreground">{todayHospitalCount} scheduled for today</span>
                       </div>
                     </div>
                   </CardContent>
@@ -2423,7 +2474,7 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Today's Appointment
+                        Total Online Appointments
                       </CardTitle>
                       <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
                         <Video className="w-5 h-5 text-warning" />
@@ -2432,9 +2483,9 @@ const AdminDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{todayOnlineCount}</div>
+                      <div className="text-3xl font-bold text-foreground">{totalOnlineCount}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Online visit</span>
+                        <span className="text-muted-foreground">{todayOnlineCount} scheduled for today</span>
                       </div>
                     </div>
                   </CardContent>
@@ -2444,7 +2495,7 @@ const AdminDashboard = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Today's Appointment
+                        Total Home Appointments
                       </CardTitle>
                       <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                         <HomeIcon className="w-5 h-5 text-primary" />
@@ -2453,9 +2504,9 @@ const AdminDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      <div className="text-3xl font-bold text-foreground">{todayHomeCount}</div>
+                      <div className="text-3xl font-bold text-foreground">{totalHomeCount}</div>
                       <div className="flex items-center gap-1 text-sm">
-                        <span className="text-muted-foreground">Home visits today</span>
+                        <span className="text-muted-foreground">{todayHomeCount} scheduled for today</span>
                       </div>
                     </div>
                   </CardContent>

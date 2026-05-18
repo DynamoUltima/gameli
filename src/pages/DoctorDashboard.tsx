@@ -1825,12 +1825,9 @@ const DoctorDashboard = () => {
                             <div className="flex gap-[2px]">
                               {uniqueVisitTypes.map((vType, idx) => {
                                 let dotColor = 'bg-primary';
-                                if (!isSelected) {
-                                  if (vType === 'online') dotColor = 'bg-blue-500';
-                                  else if (vType === 'home') dotColor = 'bg-emerald-500';
-                                } else {
-                                  dotColor = 'bg-primary-foreground/90';
-                                }
+                                if (vType === 'online') dotColor = isSelected ? 'bg-amber-300' : 'bg-amber-500';
+                                else if (vType === 'home') dotColor = isSelected ? 'bg-emerald-300' : 'bg-emerald-500';
+                                else dotColor = isSelected ? 'bg-primary-foreground/90' : 'bg-primary';
                                 return <span key={idx} className={`w-1 h-1 rounded-full ${dotColor}`}></span>;
                               })}
                             </div>
@@ -1846,6 +1843,11 @@ const DoctorDashboard = () => {
                     >
                       {isMonthExpanded ? "Show current week" : "Show full month"}
                     </button>
+                    <div className="flex items-center justify-center gap-3 mt-3 text-[10px] text-muted-foreground">
+                      <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-primary"></span>Hospital</div>
+                      <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Online</div>
+                      <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>Home</div>
+                    </div>
                   </div>
                 </div>
 
@@ -1897,11 +1899,10 @@ const DoctorDashboard = () => {
                             )}
                           </div>
                           <Button 
-
                             variant="ghost" 
                             size="icon" 
                             onClick={() => handleDeleteSlot(slot.id)}
-                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                            className="h-8 w-8 hover:bg-destructive/10 text-destructive/70 hover:text-destructive transition-colors shrink-0"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>

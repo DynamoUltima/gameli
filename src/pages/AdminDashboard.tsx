@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useDoctors } from "@/hooks/useDoctors";
-import { Settings, Users, LogOut, CheckCircle, Clock, Eye, Ban, Edit, Trash2, UserPlus, PlusCircle, Search, CalendarDays, Loader2, Download, FileText } from "lucide-react";
+import { Settings, Users, LogOut, CheckCircle, Clock, Eye, Ban, Edit, Trash2, UserPlus, PlusCircle, Search, CalendarDays, Loader2, Download, FileText, Receipt } from "lucide-react";
 import { AddDoctorDialog } from "@/components/admin/AddDoctorDialog";
 import { EditDoctorDialog } from "@/components/admin/EditDoctorDialog";
 import { DoctorCalendarView } from "@/components/admin/DoctorCalendarView";
@@ -174,6 +174,14 @@ const AdminDashboard = () => {
   const [requestsCurrentPage, setRequestsCurrentPage] = useState(1);
   const requestsPerPage = 6; // 2 rows of 3 cards
 
+  // Receipts state
+  const [receipts, setReceipts] = useState<any[]>([]);
+  const [loadingReceipts, setLoadingReceipts] = useState(false);
+  const [receiptSearchQuery, setReceiptSearchQuery] = useState('');
+  const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+  const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null);
+
   // Reports state
   const [reportType, setReportType] = useState<string>('appointments');
   const [startDate, setStartDate] = useState<string>('');
@@ -257,12 +265,194 @@ const AdminDashboard = () => {
     }
   };
 
+  // Fetch receipts (paid appointments)
+  const fetchReceipts = async () => {
+    try {
+      setLoadingReceipts(true);
+      // Fetch paid appointments
+      const { data: paidApts, error } = await supabase
+        .from('appointments')
+        .select('id, patient_id, doctor_id, type, clinic, scheduled_at, payment_status, specialty_id, created_at');
+      if (error) throw error;
+
+      const rows = (paidApts || []).filter((a: any) => a.payment_status === 'paid');
+
+      const patientIds = Array.from(new Set(rows.map((a: any) => a.patient_id).filter(Boolean)));
+      const doctorIds = Array.from(new Set(rows.map((a: any) => a.doctor_id).filter(Boolean)));
+      const specialtyIds = Array.from(new Set(rows.map((a: any) => a.specialty_id).filter(Boolean)));
+
+      const [{ data: patientProfiles }, { data: doctorProfiles }, { data: specialtiesData }] = await Promise.all([
+        patientIds.length ? supabase.from('profiles').select('id, full_name, phone, email').in('id', patientIds) : Promise.resolve({ data: [] as any }),
+        doctorIds.length ? supabase.from('profiles').select('id, full_name').in('id', doctorIds) : Promise.resolve({ data: [] as any }),
+        specialtyIds.length ? supabase.from('specialties').select('id, cost, name').in('id', specialtyIds) : Promise.resolve({ data: [] as any }),
+      ]);
+
+      const patientMap = new Map<string, any>((patientProfiles as any[] || []).map((p: any) => [p.id, p]));
+      const doctorMap = new Map<string, any>((doctorProfiles as any[] || []).map((p: any) => [p.id, p]));
+      const costMap = new Map<string, number>((specialtiesData as any[] || []).map((s: any) => [s.id, Number(s.cost) || 0]));
+      const specialtyNameMap = new Map<string, string>((specialtiesData as any[] || []).map((s: any) => [s.id, s.name]));
+
+      const mapped = rows
+        .map((a: any) => {
+          const p = patientMap.get(a.patient_id) as any;
+          const d = a.doctor_id ? (doctorMap.get(a.doctor_id) as any) : null;
+          const dt = new Date(a.scheduled_at);
+          const amount = a.specialty_id ? (costMap.get(a.specialty_id) || 0) : 0;
+          return {
+            id: a.id,
+            patientName: p?.full_name || 'Unknown',
+            patientEmail: p?.email || '',
+            patientPhone: p?.phone || '',
+            doctorName: d ? `Dr. ${d.full_name}` : '—',
+            type: a.type,
+            clinic: a.clinic || 'General',
+            scheduledAt: a.scheduled_at,
+            scheduledDate: dt.toLocaleDateString('en-US'),
+            scheduledTime: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            amount,
+            specialtyName: a.specialty_id ? (specialtyNameMap.get(a.specialty_id) || 'N/A') : 'N/A',
+            createdAt: a.created_at,
+          };
+        })
+        .sort((a: any, b: any) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime());
+
+      setReceipts(mapped);
+    } catch (err: any) {
+      console.error('Error fetching receipts:', err);
+      toast({ title: 'Error', description: 'Failed to load receipts', variant: 'destructive' });
+    } finally {
+      setLoadingReceipts(false);
+    }
+  };
+
+  // Download a single receipt as PDF
+  const handleDownloadReceiptPDF = (receipt: any) => {
+    setDownloadingReceiptId(receipt.id);
+    try {
+      const pdfDoc = new jsPDF();
+      const pageWidth = pdfDoc.internal.pageSize.getWidth();
+
+      // Header
+      pdfDoc.setFillColor(41, 98, 160);
+      pdfDoc.rect(0, 0, pageWidth, 38, 'F');
+      pdfDoc.setTextColor(255, 255, 255);
+      pdfDoc.setFontSize(20);
+      pdfDoc.setFont('helvetica', 'bold');
+      pdfDoc.text("St. Gamaliel's Hospital", pageWidth / 2, 16, { align: 'center' });
+      pdfDoc.setFontSize(11);
+      pdfDoc.setFont('helvetica', 'normal');
+      pdfDoc.text('Payment Receipt', pageWidth / 2, 27, { align: 'center' });
+
+      // Receipt ID & Date
+      pdfDoc.setTextColor(60, 60, 60);
+      pdfDoc.setFontSize(10);
+      const receiptDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      pdfDoc.text(`Receipt Date: ${receiptDate}`, 14, 52);
+      pdfDoc.text(`Reference: #REC-${receipt.id.slice(0, 8).toUpperCase()}`, pageWidth - 14, 52, { align: 'right' });
+
+      pdfDoc.setDrawColor(200, 200, 200);
+      pdfDoc.line(14, 57, pageWidth - 14, 57);
+
+      // Patient Info
+      pdfDoc.setFontSize(11);
+      pdfDoc.setFont('helvetica', 'bold');
+      pdfDoc.setTextColor(41, 98, 160);
+      pdfDoc.text('Patient Information', 14, 67);
+      pdfDoc.setFont('helvetica', 'normal');
+      pdfDoc.setTextColor(60, 60, 60);
+      pdfDoc.setFontSize(10);
+
+      const col1 = 14, col2 = 80;
+      const labelColor: [number, number, number] = [120, 120, 120];
+      const valueColor: [number, number, number] = [30, 30, 30];
+      let y = 76;
+      const infoRows: [string, string, string, string][] = [
+        ['Name:', receipt.patientName, 'Phone:', receipt.patientPhone],
+        ['Email:', receipt.patientEmail, 'Doctor:', receipt.doctorName],
+      ];
+      infoRows.forEach(([l1, v1, l2, v2]) => {
+        pdfDoc.setTextColor(...labelColor);
+        pdfDoc.text(l1, col1, y);
+        pdfDoc.setTextColor(...valueColor);
+        pdfDoc.text(v1, col1 + 20, y);
+        pdfDoc.setTextColor(...labelColor);
+        pdfDoc.text(l2, col2 + 10, y);
+        pdfDoc.setTextColor(...valueColor);
+        pdfDoc.text(v2, col2 + 30, y);
+        y += 9;
+      });
+
+      // Appointment Details
+      pdfDoc.setFont('helvetica', 'bold');
+      pdfDoc.setTextColor(41, 98, 160);
+      pdfDoc.setFontSize(11);
+      y += 4;
+      pdfDoc.text('Appointment Details', 14, y);
+      y += 9;
+      pdfDoc.setFont('helvetica', 'normal');
+      pdfDoc.setFontSize(10);
+      const apptRows: [string, string, string, string][] = [
+        ['Clinic:', receipt.clinic, 'Type:', receipt.type.charAt(0).toUpperCase() + receipt.type.slice(1)],
+        ['Date:', receipt.scheduledDate, 'Time:', receipt.scheduledTime],
+        ['Specialty:', receipt.specialtyName, '', ''],
+      ];
+      apptRows.forEach(([l1, v1, l2, v2]) => {
+        pdfDoc.setTextColor(...labelColor);
+        pdfDoc.text(l1, col1, y);
+        pdfDoc.setTextColor(...valueColor);
+        pdfDoc.text(v1, col1 + 20, y);
+        if (l2) {
+          pdfDoc.setTextColor(...labelColor);
+          pdfDoc.text(l2, col2 + 10, y);
+          pdfDoc.setTextColor(...valueColor);
+          pdfDoc.text(v2, col2 + 30, y);
+        }
+        y += 9;
+      });
+
+      // Payment Summary Box
+      y += 6;
+      pdfDoc.setFillColor(240, 248, 255);
+      pdfDoc.setDrawColor(41, 98, 160);
+      pdfDoc.roundedRect(14, y, pageWidth - 28, 28, 3, 3, 'FD');
+      pdfDoc.setFont('helvetica', 'bold');
+      pdfDoc.setFontSize(11);
+      pdfDoc.setTextColor(60, 60, 60);
+      pdfDoc.text('Amount Paid', 22, y + 10);
+      pdfDoc.setFontSize(18);
+      pdfDoc.setTextColor(41, 98, 160);
+      pdfDoc.text(`GHS ${receipt.amount.toFixed(2)}`, pageWidth - 22, y + 10, { align: 'right' });
+      pdfDoc.setFontSize(9);
+      pdfDoc.setFont('helvetica', 'normal');
+      pdfDoc.setTextColor(100, 100, 100);
+      pdfDoc.text('Payment Status: PAID ✓', 22, y + 21);
+
+      // Footer
+      const footerY = 270;
+      pdfDoc.setDrawColor(200, 200, 200);
+      pdfDoc.line(14, footerY, pageWidth - 14, footerY);
+      pdfDoc.setFontSize(8.5);
+      pdfDoc.setTextColor(140, 140, 140);
+      pdfDoc.text("St. Gamaliel's Hospital · Tel: 0533-675-498", pageWidth / 2, footerY + 8, { align: 'center' });
+      pdfDoc.text('Thank you for choosing St. Gamaliel\'s Hospital for your healthcare needs.', pageWidth / 2, footerY + 15, { align: 'center' });
+
+      pdfDoc.save(`receipt-${receipt.id.slice(0, 8)}.pdf`);
+    } catch (err) {
+      console.error('Error generating receipt PDF:', err);
+      toast({ title: 'Error', description: 'Failed to generate receipt PDF', variant: 'destructive' });
+    } finally {
+      setDownloadingReceiptId(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "campaigns") {
       setIsCampaignModalOpen(false);
       fetchCampaigns();
     } else if (activeTab === "communication") {
       fetchMessageLogs();
+    } else if (activeTab === "receipts") {
+      fetchReceipts();
     }
   }, [activeTab]);
 
@@ -2069,6 +2259,14 @@ const AdminDashboard = () => {
               <BarChart3 className="w-4 h-4 mr-3" />
               Reports
             </Button>
+            <Button
+              variant={activeTab === "receipts" ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => setActiveTab("receipts")}
+            >
+              <Receipt className="w-4 h-4 mr-3" />
+              Receipts
+            </Button>
           </div>
         </nav>
 
@@ -2103,6 +2301,7 @@ const AdminDashboard = () => {
 
                 {activeTab === "communication" && "Patient Communication"}
                 {activeTab === "reports" && "Reports & Analytics"}
+                {activeTab === "receipts" && "Patient Receipts"}
               </h1>
               <p className="text-muted-foreground">
                 Welcome back, manage your hospital operations
@@ -3898,6 +4097,185 @@ const AdminDashboard = () => {
               </div>
             </div>
           )}
+
+          {/* Receipts Tab */}
+          {activeTab === "receipts" && (
+            <div className="space-y-6">
+              {/* Search & Summary Bar */}
+              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by patient, doctor, clinic…"
+                    className="pl-9"
+                    value={receiptSearchQuery}
+                    onChange={(e) => setReceiptSearchQuery(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant="secondary" className="text-sm px-3 py-1">
+                    {receipts.length} paid receipt{receipts.length !== 1 ? 's' : ''}
+                  </Badge>
+                  <Button variant="outline" size="sm" onClick={fetchReceipts} disabled={loadingReceipts}>
+                    {loadingReceipts ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Refresh'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Receipts Table */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Payment Receipts</CardTitle>
+                  <CardDescription>All paid appointment receipts — download a PDF for any patient</CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {loadingReceipts ? (
+                    <div className="flex items-center justify-center h-48">
+                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    </div>
+                  ) : (() => {
+                    const filtered = receipts.filter((r) => {
+                      const q = receiptSearchQuery.toLowerCase();
+                      return !q ||
+                        r.patientName.toLowerCase().includes(q) ||
+                        r.doctorName.toLowerCase().includes(q) ||
+                        (r.clinic || '').toLowerCase().includes(q) ||
+                        (r.specialtyName || '').toLowerCase().includes(q) ||
+                        r.id.toLowerCase().includes(q);
+                    });
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center justify-center h-48 text-center text-muted-foreground gap-3">
+                          <Receipt className="w-12 h-12 opacity-30" />
+                          <p className="text-sm">{receiptSearchQuery ? 'No receipts match your search.' : 'No paid receipts found.'}</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Receipt Ref</TableHead>
+                              <TableHead>Patient</TableHead>
+                              <TableHead>Doctor</TableHead>
+                              <TableHead>Specialty / Clinic</TableHead>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Date</TableHead>
+                              <TableHead className="text-right">Amount</TableHead>
+                              <TableHead className="text-center">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filtered.map((receipt) => (
+                              <TableRow key={receipt.id}>
+                                <TableCell className="font-mono text-xs text-muted-foreground">
+                                  #REC-{receipt.id.slice(0, 8).toUpperCase()}
+                                </TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="font-medium">{receipt.patientName}</p>
+                                    <p className="text-xs text-muted-foreground">{receipt.patientPhone || receipt.patientEmail}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell>{receipt.doctorName}</TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="text-sm">{receipt.specialtyName}</p>
+                                    <p className="text-xs text-muted-foreground capitalize">{receipt.clinic}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-1.5">
+                                    {getTypeIcon(receipt.type)}
+                                    <span className="capitalize text-sm">{receipt.type}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div>
+                                    <p className="text-sm">{receipt.scheduledDate}</p>
+                                    <p className="text-xs text-muted-foreground">{receipt.scheduledTime}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right font-semibold text-success">
+                                  GHS {receipt.amount.toFixed(2)}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleDownloadReceiptPDF(receipt)}
+                                    disabled={downloadingReceiptId === receipt.id}
+                                    className="gap-1.5"
+                                  >
+                                    {downloadingReceiptId === receipt.id ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Download className="w-3.5 h-3.5" />
+                                    )}
+                                    PDF
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+
+              {/* Summary Stats Cards */}
+              {!loadingReceipts && receipts.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Card>
+                    <CardContent className="pt-5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Receipts</p>
+                          <p className="text-2xl font-bold mt-1">{receipts.length}</p>
+                        </div>
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <FileText className="w-5 h-5 text-primary" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Revenue</p>
+                          <p className="text-2xl font-bold mt-1 text-success">
+                            GHS {receipts.reduce((s, r) => s + r.amount, 0).toFixed(2)}
+                          </p>
+                        </div>
+                        <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+                          <DollarSign className="w-5 h-5 text-success" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Avg. Per Visit</p>
+                          <p className="text-2xl font-bold mt-1">
+                            GHS {(receipts.reduce((s, r) => s + r.amount, 0) / receipts.length).toFixed(2)}
+                          </p>
+                        </div>
+                        <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
+                          <BarChart3 className="w-5 h-5 text-warning" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -4186,7 +4564,7 @@ const AdminDashboard = () => {
 
       {/* Add Admin Dialog */}
       <Dialog open={addAdminOpen} onOpenChange={setAddAdminOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add New Administrator</DialogTitle>
             <DialogDescription>

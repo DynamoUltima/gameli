@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserRole, UserRole } from '@/hooks/useUserRole';
+import { IdleTimerProvider } from '@/components/IdleTimerProvider';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -44,5 +45,13 @@ export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) 
     return null;
   }
 
-  return <>{children}</>;
+  // Wrap with idle timer if it's an admin route
+  const isAdminRoute = role === 'admin';
+
+  return (
+    <IdleTimerProvider enabled={isAdminRoute}>
+      {children}
+    </IdleTimerProvider>
+  );
 };
+

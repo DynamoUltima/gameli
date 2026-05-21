@@ -991,50 +991,10 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                     </div>
                                 ) : (
                                     <>
-                                        <div className="space-y-4 mb-6">
-                                            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Payment Method</label>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <label className="cursor-pointer">
-                                            <input type="radio" name="paymentMethod" value="mobile" checked={paymentMethod === 'mobile'} onChange={() => setPaymentMethod('mobile')} className="peer sr-only" />
-                                            <div className={`px-4 py-3 border rounded-xl text-center text-sm font-medium transition-all flex items-center justify-center gap-2 ${paymentMethod === 'mobile' ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white hover:border-slate-300 dark:hover:border-slate-700'}`}>
-                                                <Smartphone className="w-5 h-5" /> Mobile Money
-                                            </div>
-                                        </label>
-                                        <label className="cursor-pointer">
-                                            <input type="radio" name="paymentMethod" value="bank" checked={paymentMethod === 'bank'} onChange={() => setPaymentMethod('bank')} className="peer sr-only" />
-                                            <div className={`px-4 py-3 border rounded-xl text-center text-sm font-medium transition-all flex items-center justify-center gap-2 ${paymentMethod === 'bank' ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white hover:border-slate-300 dark:hover:border-slate-700'}`}>
-                                                <CreditCard className="w-5 h-5" /> Bank Payment
-                                            </div>
-                                        </label>
-                                    </div>
-                                </div>
-
-                                {paymentMethod === 'mobile' ? (
-                                    <div className="space-y-4 animate-fade-in">
-                                        <div className="space-y-2">
-                                            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Mobile Money Number</label>
-                                            <input type="tel" required placeholder="e.g. 024XXXXXXX" pattern="[0-9]*" onChange={(e) => { e.target.value = e.target.value.replace(/\D/g, ''); }} className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm" />
+                                        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 flex items-center gap-3">
+                                            <CreditCard className="w-5 h-5 text-slate-500 shrink-0" />
+                                            <p className="text-sm text-slate-600 dark:text-slate-400">Click <strong>Pay &amp; Confirm</strong> to complete your payment securely via Paystack.</p>
                                         </div>
-                                        <div className="space-y-2">
-                                            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Network Provider</label>
-                                            <select required className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm">
-                                                <option value="" disabled selected>Select network...</option>
-                                                <option value="mtn">MTN</option>
-                                                <option value="vodafone">Telecel / Vodafone</option>
-                                                <option value="airteltigo">AT / AirtelTigo</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2 animate-fade-in">
-                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 block tracking-tight">Card Information</label>
-                                        <input type="text" required placeholder="Card Number" className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm mb-3" />
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <input type="text" required placeholder="MM/YY" className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm" />
-                                            <input type="text" required placeholder="CVC" className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-slate-400 transition-all text-sm" />
-                                        </div>
-                                    </div>
-                                )}
                                     </>
                                 )}
                                 <button type="submit" className="hidden"></button>

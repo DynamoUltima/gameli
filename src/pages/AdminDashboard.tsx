@@ -16,13 +16,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useDoctors } from "@/hooks/useDoctors";
-import { Settings, Users, LogOut, CheckCircle, Clock, Eye, Ban, Edit, Trash2, UserPlus, PlusCircle, Search, CalendarDays, Loader2, Download, FileText, Receipt } from "lucide-react";
+import { Settings, Users, LogOut, CheckCircle, Clock, Eye, Ban, Edit, Trash2, UserPlus, PlusCircle, Search, CalendarDays, Loader2, Download, FileText, Receipt, ClipboardList } from "lucide-react";
 import { AddDoctorDialog } from "@/components/admin/AddDoctorDialog";
 import { EditDoctorDialog } from "@/components/admin/EditDoctorDialog";
 import { DoctorCalendarView } from "@/components/admin/DoctorCalendarView";
 import { ManageDoctorAvailability } from "@/components/admin/ManageDoctorAvailability";
+import { FaqManager } from "@/components/admin/FaqManager";
+import { HelpCircle } from "lucide-react";
 import { generateReport } from "@/utils/reportGenerator";
+import { getPaymentValidity } from "@/lib/paymentValidity";
 import { supabase } from "@/integrations/supabase/client";
+import { labelForNationalIdType, updateNationalIdStatus as updateNationalIdStatusSvc } from "@/lib/nationalIdService";
+import { groupQuestionnaire } from "@/lib/fertilityQuestions";
 import { db, app } from "@/integrations/firebase/client";
 import { sendEmail } from "@/lib/emailService";
 import { initializeApp, deleteApp } from "firebase/app";
@@ -61,6 +66,10 @@ import {
   X,
 } from "lucide-react";
 
+// Appointments are booked in 30-minute slots (see useDoctorSchedules), so a
+// booking's end time is its scheduled start plus this duration.
+const APPOINTMENT_DURATION_MS = 30 * 60 * 1000;
+
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
   const { doctors: doctorsData, specialties, loading: doctorsLoading, fetchDoctors, fetchSpecialties } = useDoctors();
@@ -93,6 +102,7 @@ const AdminDashboard = () => {
   const { toast } = useToast();
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [showExpiredOnly, setShowExpiredOnly] = useState(false);
   const [addDoctorOpen, setAddDoctorOpen] = useState(false);
   const [editDoctorOpen, setEditDoctorOpen] = useState(false);
   const [selectedEditDoctor, setSelectedEditDoctor] = useState<any>(null);
@@ -161,6 +171,8 @@ const AdminDashboard = () => {
   // Patient Management state
   const [patientUsers, setPatientUsers] = useState<any[]>([]);
   const [loadingPatients, setLoadingPatients] = useState(true);
+  // National ID verification dialog (profile-level)
+  const [idReviewPatient, setIdReviewPatient] = useState<any>(null);
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
   const [editPatientOpen, setEditPatientOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
@@ -205,6 +217,134 @@ const AdminDashboard = () => {
 
   // Chart colors
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+  // Booking details dialog
+  const [viewAppointment, setViewAppointment] = useState<any | null>(null);
+  const [viewDetailsOpen, setViewDetailsOpen] = useState(false);
+
+  // Fertility / medical questionnaires, grouped by appointment_id
+  const [medicalFormsByAppt, setMedicalFormsByAppt] = useState<Record<string, any[]>>({});
+  // Questionnaire currently open in the viewer dialog
+  const [viewingForm, setViewingForm] = useState<any | null>(null);
+
+  useEffect(() => {
+    const loadMedicalForms = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'medical_forms'));
+        const grouped: Record<string, any[]> = {};
+        snapshot.forEach((docSnap) => {
+          const form = { id: docSnap.id, ...(docSnap.data() as any) };
+          if (!form.appointment_id) return;
+          if (!grouped[form.appointment_id]) grouped[form.appointment_id] = [];
+          grouped[form.appointment_id].push(form);
+        });
+        setMedicalFormsByAppt(grouped);
+      } catch (error) {
+        console.error('Error fetching medical forms:', error);
+      }
+    };
+    loadMedicalForms();
+  }, []);
+
+  const formLabelForType = (formType?: string) =>
+    formType === 'male_fertility' ? 'Male Fertility Questionnaire' :
+    formType === 'female_fertility' ? 'Female Fertility Questionnaire' :
+    formType === 'couple_fertility' ? 'Couple Fertility Questionnaire' :
+    'Medical Questionnaire';
+
+  const generateFormPDF = (form: any) => {
+    if (!form) return;
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    let y = margin;
+
+    const formLabel = formLabelForType(form.form_type);
+
+    // ---- Header ----
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.rect(0, 0, pageWidth, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text("ST. GAMALIEL'S HOSPITAL", margin, 11);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(formLabel.toUpperCase(), margin, 18);
+    const submittedDate = form.created_at
+      ? new Date(form.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      : 'N/A';
+    doc.text(`Submitted: ${submittedDate}  ·  Status: ${(form.status || 'submitted').toUpperCase()}`, margin, 24);
+    y = 36;
+
+    if (!form.data || Object.keys(form.data).length === 0) {
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(11);
+      doc.text('No responses recorded in this questionnaire.', margin, y + 10);
+      doc.save(`fertility-questionnaire-${form.id?.slice(-6) || 'form'}.pdf`);
+      return;
+    }
+
+    // ---- Group entries into sections with real question text ----
+    const sections = groupQuestionnaire(form.data);
+
+    // ---- Render each section as a table ----
+    sections.forEach(({ section: sectionName, rows }) => {
+      if (rows.length === 0) return;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(30, 64, 175); // blue-800
+      doc.text(sectionName.toUpperCase(), margin, y);
+      y += 2;
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [['Question', 'Response']],
+        body: rows.map(r => [r.label, r.value]),
+        styles: { fontSize: 8.5, cellPadding: 3, textColor: [30, 41, 59] },
+        headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85], fontStyle: 'bold', fontSize: 8 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: { 0: { cellWidth: 115 }, 1: { cellWidth: 'auto', fontStyle: 'bold' } },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 8;
+
+      if (y > 270) { doc.addPage(); y = margin; }
+    });
+
+    // ---- Footer on each page ----
+    const totalPages = (doc.internal as any).getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`St. Gamaliel's Hospital · Confidential Medical Record · Page ${i} of ${totalPages}`, margin, 290);
+    }
+
+    doc.save(`${form.form_type || 'medical'}-questionnaire-${form.id?.slice(-6) || 'form'}.pdf`);
+  };
+
+  // Format an ISO string as a readable date + time (e.g. "Jul 2, 2026, 09:00 AM")
+  const formatDateTime = (iso?: string | null) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
+
+  // Payment-validity (3-month expiry) for an appointment row, using the shared util.
+  const getApptValidity = (apt: any) => getPaymentValidity({
+    payment_status: apt?.paymentStatus,
+    paid_at: apt?.paidAtISO,
+    payment_expires_at: apt?.paymentExpiresAtISO,
+    created_at: apt?.createdAtISO,
+  });
 
   // Handle campaign input changes
   const handleCampaignInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -435,7 +575,7 @@ const AdminDashboard = () => {
       pdfDoc.setFontSize(8.5);
       pdfDoc.setTextColor(140, 140, 140);
       pdfDoc.text("St. Gamaliel's Hospital · Tel: 0533-675-498", pageWidth / 2, footerY + 8, { align: 'center' });
-      pdfDoc.text('Thank you for choosing St. Gamaliel\'s Hospital for your healthcare needs.', pageWidth / 2, footerY + 15, { align: 'center' });
+      pdfDoc.text('Thank you for booking. This receipt is valid for 3 months.', pageWidth / 2, footerY + 15, { align: 'center' });
 
       pdfDoc.save(`receipt-${receipt.id.slice(0, 8)}.pdf`);
     } catch (err) {
@@ -939,10 +1079,24 @@ const AdminDashboard = () => {
     scheduledDate: string;
     scheduledTime: string;
     scheduledAtISO: string;
+    endsAtISO: string | null;
+    createdAtISO: string | null;
+    paidAtISO: string | null;
+    paymentExpiresAtISO: string | null;
     status: string;
     paymentStatus: string;
     symptoms?: string | null;
     location?: string | null;
+    ghanaCardUrl?: string | null;
+    ghanaCardHolder?: string | null;
+    ghanaCardStatus?: string | null;
+    ghanaCardVerifiedBy?: string | null;
+    ghanaCardVerifiedAt?: string | null;
+    patientId?: string | null;
+    nationalIdType?: string | null;
+    nationalIdFrontUrl?: string | null;
+    nationalIdBackUrl?: string | null;
+    nationalIdStatus?: string | null;
   }>>([]);
 
   const doctorFilterOptions = useMemo(() => {
@@ -950,14 +1104,27 @@ const AdminDashboard = () => {
     return names.filter(n => n && n !== "—");
   }, [appointments]);
 
+  // A booking whose payment has expired but was never used (not completed/cancelled)
+  // — money at risk of forfeiture that the admin should act on.
+  const isExpiredUnused = (a: any) => {
+    const v = getApptValidity(a);
+    return v.isPaid && v.isExpired && a.status !== "completed" && a.status !== "cancelled";
+  };
+
+  const expiredUnusedCount = useMemo(
+    () => appointments.filter(isExpiredUnused).length,
+    [appointments]
+  );
+
   const filteredAppointments = useMemo(() => {
     return appointments.filter(a => {
       const byDoctor = filterDoctor === "all" || a.doctor === filterDoctor;
       const byType = filterType === "all" || a.type === filterType;
       const byStatus = filterStatus === "all" || a.status === filterStatus;
-      return byDoctor && byType && byStatus;
+      const byExpired = !showExpiredOnly || isExpiredUnused(a);
+      return byDoctor && byType && byStatus && byExpired;
     });
-  }, [appointments, filterDoctor, filterType, filterStatus]);
+  }, [appointments, filterDoctor, filterType, filterStatus, showExpiredOnly]);
 
   useEffect(() => {
     const loadAppointments = async () => {
@@ -965,7 +1132,7 @@ const AdminDashboard = () => {
       // documents that are missing the ordered field. Fetch all and sort client-side.
       const { data: appts } = await supabase
         .from("appointments" as any)
-        .select("id, patient_id, doctor_id, type, clinic, scheduled_at, status, payment_status, symptoms, location, created_at");
+        .select("id, patient_id, doctor_id, type, clinic, scheduled_at, status, payment_status, symptoms, location, created_at, paid_at, payment_expires_at, ghana_card_url, ghana_card_holder, ghana_card_status, ghana_card_verified_by, ghana_card_verified_at");
       const rows = ((appts as any[]) || []).sort((a: any, b: any) => {
         const aTime = a.created_at ? new Date(a.created_at).getTime() : new Date(a.scheduled_at || 0).getTime();
         const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.scheduled_at || 0).getTime();
@@ -974,7 +1141,7 @@ const AdminDashboard = () => {
       const patientIds = Array.from(new Set(rows.map((a: any) => a.patient_id).filter(Boolean)));
       const doctorIds = Array.from(new Set(rows.map((a: any) => a.doctor_id).filter(Boolean)));
       const [{ data: patientProfiles }, { data: doctorProfiles }] = await Promise.all([
-        patientIds.length ? supabase.from("profiles").select("id, full_name, phone").in("id", patientIds) : Promise.resolve({ data: [] as any }),
+        patientIds.length ? supabase.from("profiles").select("id, full_name, phone, national_id_type, national_id_front_url, national_id_back_url, national_id_status").in("id", patientIds) : Promise.resolve({ data: [] as any }),
         doctorIds.length ? supabase.from("profiles").select("id, full_name").in("id", doctorIds) : Promise.resolve({ data: [] as any }),
       ]);
       const patientMap = new Map<string, any>((patientProfiles as any[] || []).map((p: any) => [p.id, p]));
@@ -993,10 +1160,24 @@ const AdminDashboard = () => {
           scheduledDate: dt.toLocaleDateString('en-US'),
           scheduledTime: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           scheduledAtISO: a.scheduled_at,
+          endsAtISO: a.scheduled_at ? new Date(dt.getTime() + APPOINTMENT_DURATION_MS).toISOString() : null,
+          createdAtISO: a.created_at || null,
+          paidAtISO: a.paid_at || null,
+          paymentExpiresAtISO: a.payment_expires_at || null,
           status: a.status,
           paymentStatus: a.payment_status,
           symptoms: a.symptoms || null,
           location: a.location || null,
+          ghanaCardUrl: a.ghana_card_url || null,
+          ghanaCardHolder: a.ghana_card_holder || null,
+          ghanaCardStatus: a.ghana_card_status || null,
+          ghanaCardVerifiedBy: a.ghana_card_verified_by || null,
+          ghanaCardVerifiedAt: a.ghana_card_verified_at || null,
+          patientId: a.patient_id || null,
+          nationalIdType: p?.national_id_type || null,
+          nationalIdFrontUrl: p?.national_id_front_url || null,
+          nationalIdBackUrl: p?.national_id_back_url || null,
+          nationalIdStatus: p?.national_id_status || null,
         };
       }));
     };
@@ -1277,6 +1458,10 @@ const AdminDashboard = () => {
             'Clinic': apt.clinic || 'N/A',
             'Date': apt.scheduledDate,
             'Time': apt.scheduledTime,
+            'Ends': apt.endsAtISO ? new Date(apt.endsAtISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A',
+            'Booked On': apt.createdAtISO ? new Date(apt.createdAtISO).toLocaleString('en-US') : 'N/A',
+            'Payment Expires': (() => { const v = getApptValidity(apt); return v.expiresAt ? v.expiresAt.toLocaleDateString('en-US') : 'N/A'; })(),
+            'Payment Validity': (() => { const v = getApptValidity(apt); return !v.isPaid ? 'N/A' : v.isExpired ? 'Expired' : 'Valid'; })(),
             'Status': apt.status,
             'Payment': apt.paymentStatus,
             'Symptoms': apt.symptoms || 'N/A',
@@ -1398,6 +1583,10 @@ const AdminDashboard = () => {
             'Clinic': apt.clinic || 'N/A',
             'Date': apt.scheduledDate,
             'Time': apt.scheduledTime,
+            'Ends': apt.endsAtISO ? new Date(apt.endsAtISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A',
+            'Booked On': apt.createdAtISO ? new Date(apt.createdAtISO).toLocaleString('en-US') : 'N/A',
+            'Payment Expires': (() => { const v = getApptValidity(apt); return v.expiresAt ? v.expiresAt.toLocaleDateString('en-US') : 'N/A'; })(),
+            'Payment Validity': (() => { const v = getApptValidity(apt); return !v.isPaid ? 'N/A' : v.isExpired ? 'Expired' : 'Valid'; })(),
             'Status': apt.status,
             'Payment': apt.paymentStatus,
             'Symptoms': apt.symptoms || 'N/A',
@@ -2050,13 +2239,13 @@ const AdminDashboard = () => {
       const loadAppointments = async () => {
         const { data: appts } = await supabase
           .from("appointments" as any)
-          .select("id, patient_id, doctor_id, type, clinic, scheduled_at, status, payment_status, symptoms, location")
+          .select("id, patient_id, doctor_id, type, clinic, scheduled_at, status, payment_status, symptoms, location, created_at, paid_at, payment_expires_at, ghana_card_url, ghana_card_holder, ghana_card_status, ghana_card_verified_by, ghana_card_verified_at")
           .order("created_at", { ascending: false });
         const rows = (appts as any[]) || [];
         const patientIds = Array.from(new Set(rows.map(a => a.patient_id).filter(Boolean)));
         const doctorIds = Array.from(new Set(rows.map(a => a.doctor_id).filter(Boolean)));
         const [{ data: patientProfiles }, { data: doctorProfiles }] = await Promise.all([
-          patientIds.length ? supabase.from("profiles").select("id, full_name, phone").in("id", patientIds) : Promise.resolve({ data: [] as any }),
+          patientIds.length ? supabase.from("profiles").select("id, full_name, phone, national_id_type, national_id_front_url, national_id_back_url, national_id_status").in("id", patientIds) : Promise.resolve({ data: [] as any }),
           doctorIds.length ? supabase.from("profiles").select("id, full_name").in("id", doctorIds) : Promise.resolve({ data: [] as any }),
         ]);
         const patientMap = new Map<string, any>((patientProfiles as any[] || []).map((p: any) => [p.id, p]));
@@ -2075,10 +2264,24 @@ const AdminDashboard = () => {
             scheduledDate: dt.toLocaleDateString('en-US'),
             scheduledTime: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             scheduledAtISO: a.scheduled_at,
+            endsAtISO: a.scheduled_at ? new Date(dt.getTime() + APPOINTMENT_DURATION_MS).toISOString() : null,
+            createdAtISO: a.created_at || null,
+            paidAtISO: a.paid_at || null,
+            paymentExpiresAtISO: a.payment_expires_at || null,
             status: a.status,
             paymentStatus: a.payment_status,
             symptoms: a.symptoms || null,
             location: a.location || null,
+            ghanaCardUrl: a.ghana_card_url || null,
+            ghanaCardHolder: a.ghana_card_holder || null,
+            ghanaCardStatus: a.ghana_card_status || null,
+            ghanaCardVerifiedBy: a.ghana_card_verified_by || null,
+            ghanaCardVerifiedAt: a.ghana_card_verified_at || null,
+            patientId: a.patient_id || null,
+            nationalIdType: p?.national_id_type || null,
+            nationalIdFrontUrl: p?.national_id_front_url || null,
+            nationalIdBackUrl: p?.national_id_back_url || null,
+            nationalIdStatus: p?.national_id_status || null,
           };
         }));
       };
@@ -2087,6 +2290,37 @@ const AdminDashboard = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to update appointment status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Profile-level national ID verification — verify a patient's saved ID once; it
+  // then applies to all their home visits.
+  const updateNationalIdStatus = async (patientId: string, newStatus: "verified" | "rejected" | "pending") => {
+    try {
+      const verifiedBy = (user as any)?.email || (user as any)?.displayName || (user as any)?.uid || "admin";
+      await updateNationalIdStatusSvc(patientId, newStatus, verifiedBy);
+      const verifiedAt = newStatus === "pending" ? null : new Date().toISOString();
+
+      const patch = {
+        national_id_status: newStatus,
+        national_id_verified_by: newStatus === "pending" ? null : verifiedBy,
+        national_id_verified_at: verifiedAt,
+      };
+      setPatientUsers(prev => prev.map(p => p.id === patientId ? { ...p, ...patch } : p));
+      setIdReviewPatient(prev => prev && prev.id === patientId ? { ...prev, ...patch } : prev);
+      // Keep any appointment rows for this patient in sync with the profile status
+      setAppointments(prev => prev.map(apt => apt.patientId === patientId ? { ...apt, nationalIdStatus: newStatus } : apt));
+
+      toast({
+        title: newStatus === "verified" ? "ID verified" : newStatus === "rejected" ? "ID rejected" : "Verification reset",
+        description: newStatus === "pending" ? "The ID is awaiting review again." : `Marked as ${newStatus}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update verification status",
         variant: "destructive",
       });
     }
@@ -2268,6 +2502,14 @@ const AdminDashboard = () => {
               <Receipt className="w-4 h-4 mr-3" />
               Receipts
             </Button>
+            <Button
+              variant={activeTab === "faqs" ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => setActiveTab("faqs")}
+            >
+              <HelpCircle className="w-4 h-4 mr-3" />
+              FAQs
+            </Button>
           </div>
         </nav>
 
@@ -2303,6 +2545,7 @@ const AdminDashboard = () => {
                 {activeTab === "communication" && "Patient Communication"}
                 {activeTab === "reports" && "Reports & Analytics"}
                 {activeTab === "receipts" && "Patient Receipts"}
+                {activeTab === "faqs" && "FAQ Management"}
               </h1>
               <p className="text-muted-foreground">
                 Welcome back, manage your hospital operations
@@ -2932,6 +3175,31 @@ const AdminDashboard = () => {
           {/* Appointments Tab */}
           {activeTab === "appointments" && (
             <div className="space-y-6">
+              {/* Expired-payment flag — bookings paid for but never used, past the 3-month window */}
+              {expiredUnusedCount > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-destructive mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium text-foreground">
+                        {expiredUnusedCount} booking{expiredUnusedCount === 1 ? '' : 's'} with expired payment
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Paid, but not completed or cancelled, and past the 3-month validity window.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant={showExpiredOnly ? "default" : "outline"}
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setShowExpiredOnly(v => !v)}
+                  >
+                    {showExpiredOnly ? "Show all bookings" : "Review expired"}
+                  </Button>
+                </div>
+              )}
+
               {/* Filters */}
               <Card>
                 <CardContent className="pt-6">
@@ -2994,6 +3262,7 @@ const AdminDashboard = () => {
                         <TableHead>Type</TableHead>
                         <TableHead>Clinic</TableHead>
                         <TableHead>Date & Time</TableHead>
+                        <TableHead>Booked On</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Payment</TableHead>
                         <TableHead>Actions</TableHead>
@@ -3007,6 +3276,43 @@ const AdminDashboard = () => {
                             <div>
                               <p className="font-medium">{apt.patientName}</p>
                               <p className="text-sm text-muted-foreground">{apt.phone}</p>
+                              {apt.type === 'home' && (apt.nationalIdFrontUrl || apt.ghanaCardUrl) && (
+                                <div className="mt-1.5 space-y-1.5">
+                                  <button
+                                    onClick={() => setIdReviewPatient({
+                                      id: apt.patientId,
+                                      full_name: apt.patientName,
+                                      national_id_type: apt.nationalIdType,
+                                      national_id_front_url: apt.nationalIdFrontUrl || apt.ghanaCardUrl,
+                                      national_id_back_url: apt.nationalIdBackUrl,
+                                      national_id_status: apt.nationalIdStatus,
+                                    })}
+                                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                                    title="Review national ID"
+                                  >
+                                    <FileText className="w-3 h-3" />
+                                    {labelForNationalIdType(apt.nationalIdType)}
+                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    {apt.nationalIdStatus === 'verified' ? (
+                                      <Badge className="bg-success/15 text-success hover:bg-success/15 gap-1">
+                                        <CheckCircle className="w-3 h-3" /> Verified
+                                      </Badge>
+                                    ) : apt.nationalIdStatus === 'rejected' ? (
+                                      <Badge variant="destructive" className="gap-1">
+                                        <Ban className="w-3 h-3" /> Rejected
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="gap-1">
+                                        <Clock className="w-3 h-3" /> Pending review
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              {apt.type === 'home' && !apt.nationalIdFrontUrl && !apt.ghanaCardUrl && (
+                                <p className="mt-1 text-xs text-amber-600">No national ID on file</p>
+                              )}
                             </div>
                           </TableCell>
                           <TableCell>{apt.doctor}</TableCell>
@@ -3020,17 +3326,59 @@ const AdminDashboard = () => {
                           <TableCell>
                             <div>
                               <p>{apt.scheduledDate}</p>
-                              <p className="text-sm text-muted-foreground">{apt.scheduledTime}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {apt.scheduledTime}
+                                {apt.endsAtISO && ` – ${new Date(apt.endsAtISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                              </p>
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            {apt.createdAtISO ? (
+                              <div>
+                                <p>{new Date(apt.createdAtISO).toLocaleDateString('en-US')}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {new Date(apt.createdAtISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell>{getStatusBadge(apt.status)}</TableCell>
                           <TableCell>
-                            <Badge variant={apt.paymentStatus === "paid" ? "default" : "secondary"}>
-                              {apt.paymentStatus}
-                            </Badge>
+                            {(() => {
+                              const v = getApptValidity(apt);
+                              return (
+                                <div className="space-y-1">
+                                  <Badge variant={apt.paymentStatus === "paid" ? "default" : "secondary"}>
+                                    {apt.paymentStatus}
+                                  </Badge>
+                                  {v.isPaid && v.expiresAt && (
+                                    v.isExpired ? (
+                                      <Badge variant="destructive" className="gap-1">
+                                        <AlertCircle className="w-3 h-3" /> Expired
+                                      </Badge>
+                                    ) : (
+                                      <p className={`text-[11px] ${v.daysLeft !== null && v.daysLeft <= 14 ? 'text-amber-600 font-medium' : 'text-muted-foreground'}`}>
+                                        {v.daysLeft === 0 ? 'Expires today' : `${v.daysLeft}d left`}
+                                      </p>
+                                    )
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                title="View booking details"
+                                onClick={() => { setViewAppointment(apt); setViewDetailsOpen(true); }}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
                               <Select
                                 value={apt.status}
                                 onValueChange={(value) => updateAppointmentStatus(apt.id, value)}
@@ -3379,6 +3727,7 @@ const AdminDashboard = () => {
                               <TableHead>Patient</TableHead>
                               <TableHead>Date of Birth</TableHead>
                               <TableHead>Hospital Card ID</TableHead>
+                              <TableHead>National ID</TableHead>
                               <TableHead>Email</TableHead>
                               <TableHead>Phone</TableHead>
                               <TableHead>Gender</TableHead>
@@ -3438,6 +3787,26 @@ const AdminDashboard = () => {
                                         </Badge>
                                       ) : (
                                         <span className="text-muted-foreground text-sm">Not assigned</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {patient.national_id_front_url ? (
+                                        <button
+                                          onClick={() => setIdReviewPatient(patient)}
+                                          className="flex flex-col items-start gap-1 text-left"
+                                          title="Review national ID"
+                                        >
+                                          <span className="text-xs font-medium">{labelForNationalIdType(patient.national_id_type)}</span>
+                                          {patient.national_id_status === 'verified' ? (
+                                            <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200">Verified</Badge>
+                                          ) : patient.national_id_status === 'rejected' ? (
+                                            <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-red-200">Rejected</Badge>
+                                          ) : (
+                                            <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200">Pending</Badge>
+                                          )}
+                                        </button>
+                                      ) : (
+                                        <span className="text-muted-foreground text-sm">None</span>
                                       )}
                                     </TableCell>
                                     <TableCell>{patient.email || 'N/A'}</TableCell>
@@ -4277,6 +4646,8 @@ const AdminDashboard = () => {
               )}
             </div>
           )}
+
+          {activeTab === "faqs" && <FaqManager />}
         </div>
       </main>
 
@@ -4293,6 +4664,256 @@ const AdminDashboard = () => {
         specialties={specialties}
         onSuccess={fetchDoctors}
       />
+
+      {/* Booking Details Dialog */}
+      <Dialog open={viewDetailsOpen} onOpenChange={setViewDetailsOpen}>
+        <DialogContent className="sm:max-w-[560px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Booking Details</DialogTitle>
+            <DialogDescription>
+              {viewAppointment ? `Reference #${viewAppointment.id.slice(0, 8).toUpperCase()}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {viewAppointment && (
+            <div className="space-y-5">
+              {/* Status row */}
+              <div className="flex flex-wrap items-center gap-2">
+                {getStatusBadge(viewAppointment.status)}
+                <Badge variant={viewAppointment.paymentStatus === 'paid' ? 'default' : 'secondary'}>
+                  {viewAppointment.paymentStatus}
+                </Badge>
+                <Badge variant="outline" className="gap-1 capitalize">
+                  {getTypeIcon(viewAppointment.type)}
+                  {viewAppointment.type}
+                </Badge>
+              </div>
+
+              {/* Timing — placed, starts, ends */}
+              <div className="rounded-lg border p-4 space-y-3">
+                <p className="text-sm font-semibold text-foreground">Timing</p>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Booking placed</span>
+                    <span className="font-medium text-right">{formatDateTime(viewAppointment.createdAtISO)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Appointment starts</span>
+                    <span className="font-medium text-right">{formatDateTime(viewAppointment.scheduledAtISO)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Appointment ends</span>
+                    <span className="font-medium text-right">{formatDateTime(viewAppointment.endsAtISO)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment validity — the 3-month window */}
+              {(() => {
+                const v = getApptValidity(viewAppointment);
+                return (
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <p className="text-sm font-semibold text-foreground">Payment</p>
+                    <div className="grid grid-cols-1 gap-2 text-sm">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">Status</span>
+                        <span className="font-medium text-right capitalize">{viewAppointment.paymentStatus}</span>
+                      </div>
+                      {v.isPaid && (
+                        <>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-muted-foreground">Paid on</span>
+                            <span className="font-medium text-right">
+                              {v.paidAt ? formatDateTime(v.paidAt.toISOString()) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-4">
+                            <span className="text-muted-foreground">Payment expires</span>
+                            <span className="font-medium text-right">
+                              {v.expiresAt ? formatDateTime(v.expiresAt.toISOString()) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-4 items-center">
+                            <span className="text-muted-foreground">Validity</span>
+                            {v.expiresAt ? (
+                              v.isExpired ? (
+                                <Badge variant="destructive" className="gap-1">
+                                  <AlertCircle className="w-3 h-3" /> Expired
+                                </Badge>
+                              ) : (
+                                <span className={`font-medium text-right ${v.daysLeft !== null && v.daysLeft <= 14 ? 'text-amber-600' : 'text-success'}`}>
+                                  {v.daysLeft === 0 ? 'Expires today' : `${v.daysLeft} day${v.daysLeft === 1 ? '' : 's'} left`}
+                                </span>
+                              )
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* People & clinic */}
+              <div className="rounded-lg border p-4 space-y-3">
+                <p className="text-sm font-semibold text-foreground">Appointment</p>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Patient</span>
+                    <span className="font-medium text-right">{viewAppointment.patientName}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Phone</span>
+                    <span className="font-medium text-right">{viewAppointment.phone || '—'}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Doctor</span>
+                    <span className="font-medium text-right">{viewAppointment.doctor}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Clinic</span>
+                    <span className="font-medium text-right">{viewAppointment.clinic || '—'}</span>
+                  </div>
+                  {viewAppointment.location && (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Home address</span>
+                      <span className="font-medium text-right">{viewAppointment.location}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Symptoms */}
+              <div className="rounded-lg border p-4 space-y-2">
+                <p className="text-sm font-semibold text-foreground">Symptoms / Reason for visit</p>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {viewAppointment.symptoms || 'No details provided.'}
+                </p>
+              </div>
+
+              {/* Fertility / medical questionnaires */}
+              {(() => {
+                const forms = (medicalFormsByAppt[viewAppointment.id] || [])
+                  .filter((f: any) => f.status !== 'pending' && f.data);
+                if (forms.length === 0) return null;
+                return (
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <p className="text-sm font-semibold text-foreground">Questionnaires</p>
+                    {forms.map((form: any) => (
+                      <div key={form.id} className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm text-muted-foreground flex-1 min-w-[140px]">
+                          {formLabelForType(form.form_type)}
+                        </span>
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setViewingForm(form)}>
+                          <ClipboardList className="w-3.5 h-3.5" />
+                          View
+                        </Button>
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => generateFormPDF(form)}>
+                          <Download className="w-3.5 h-3.5" />
+                          Download PDF
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* National ID (home visits) */}
+              {viewAppointment.type === 'home' && (
+                <div className="rounded-lg border p-4 space-y-2">
+                  <p className="text-sm font-semibold text-foreground">National ID verification</p>
+                  {(viewAppointment.nationalIdFrontUrl || viewAppointment.ghanaCardUrl) ? (
+                    <div className="space-y-1 text-sm">
+                      <div className="flex flex-wrap gap-3">
+                        <a
+                          href={viewAppointment.nationalIdFrontUrl || viewAppointment.ghanaCardUrl || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          {labelForNationalIdType(viewAppointment.nationalIdType)} (front)
+                        </a>
+                        {viewAppointment.nationalIdBackUrl && (
+                          <a
+                            href={viewAppointment.nationalIdBackUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            Back
+                          </a>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground capitalize">
+                        Status: {viewAppointment.nationalIdStatus || 'pending'}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-amber-600">No national ID on file.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewDetailsOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Questionnaire Viewer Dialog */}
+      <Dialog open={!!viewingForm} onOpenChange={(open) => { if (!open) setViewingForm(null); }}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-primary" />
+              {formLabelForType(viewingForm?.form_type)}
+            </DialogTitle>
+            <DialogDescription>
+              Submitted {viewingForm?.created_at ? new Date(viewingForm.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}
+              {' · '}
+              Status: <span className="capitalize font-medium">{viewingForm?.status || 'submitted'}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6">
+            {(() => {
+              const sections = groupQuestionnaire(viewingForm?.data);
+              if (sections.length === 0) {
+                return <div className="text-center py-8 text-muted-foreground text-sm">No responses recorded in this questionnaire.</div>;
+              }
+              return (
+                <div className="space-y-6 pb-4">
+                  {sections.map((sec) => (
+                    <div key={sec.section}>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">{sec.section}</h4>
+                      <div className="space-y-0">
+                        {sec.rows.map((row) => (
+                          <div key={row.key} className="flex gap-4 py-2.5 border-b border-border/40 last:border-0">
+                            <span className="text-xs font-medium text-muted-foreground flex-1 leading-relaxed">{row.label}</span>
+                            <span className="text-sm text-foreground leading-relaxed text-right shrink-0 max-w-[45%]">{row.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+          <div className="pt-4 border-t border-border mt-2 flex justify-end">
+            <Button
+              onClick={() => generateFormPDF(viewingForm)}
+              className="gap-2 bg-slate-900 hover:bg-slate-800 text-white"
+            >
+              <Download className="w-4 h-4" />
+              Download PDF
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Status Update Dialog */}
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
@@ -4742,6 +5363,71 @@ const AdminDashboard = () => {
               ) : (
                 'Save Changes'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* National ID Review Dialog (profile-level verification) */}
+      <Dialog open={!!idReviewPatient} onOpenChange={(open) => { if (!open) setIdReviewPatient(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>National ID Verification</DialogTitle>
+            <DialogDescription>
+              {labelForNationalIdType(idReviewPatient?.national_id_type)} for{" "}
+              {idReviewPatient?.full_name || `${idReviewPatient?.first_name || ''} ${idReviewPatient?.last_name || ''}`.trim()}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Current status:</span>
+              {idReviewPatient?.national_id_status === 'verified' ? (
+                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200">Verified</Badge>
+              ) : idReviewPatient?.national_id_status === 'rejected' ? (
+                <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-red-200">Rejected</Badge>
+              ) : (
+                <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200">Pending</Badge>
+              )}
+            </div>
+            {idReviewPatient?.national_id_verified_by && (
+              <p className="text-xs text-muted-foreground">
+                Last reviewed by {idReviewPatient.national_id_verified_by}
+                {idReviewPatient.national_id_verified_at ? ` on ${new Date(idReviewPatient.national_id_verified_at).toLocaleString()}` : ''}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              {idReviewPatient?.national_id_front_url && (
+                <a href={idReviewPatient.national_id_front_url} target="_blank" rel="noopener noreferrer" className="block">
+                  <img src={idReviewPatient.national_id_front_url} alt="ID front" className="w-full h-40 object-cover rounded-lg border" />
+                  <span className="block text-xs text-center text-muted-foreground mt-1">Front (click to enlarge)</span>
+                </a>
+              )}
+              {idReviewPatient?.national_id_back_url && (
+                <a href={idReviewPatient.national_id_back_url} target="_blank" rel="noopener noreferrer" className="block">
+                  <img src={idReviewPatient.national_id_back_url} alt="ID back" className="w-full h-40 object-cover rounded-lg border" />
+                  <span className="block text-xs text-center text-muted-foreground mt-1">Back (click to enlarge)</span>
+                </a>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            {idReviewPatient?.national_id_status && idReviewPatient?.national_id_status !== 'pending' && (
+              <Button variant="outline" onClick={() => idReviewPatient && updateNationalIdStatus(idReviewPatient.id, 'pending')}>
+                Reset to pending
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={() => idReviewPatient && updateNationalIdStatus(idReviewPatient.id, 'rejected')}
+            >
+              Reject
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700"
+              onClick={() => idReviewPatient && updateNationalIdStatus(idReviewPatient.id, 'verified')}
+            >
+              Verify
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -267,7 +267,7 @@ class QueryBuilder {
 
       resolve({ count: data.length, data, error: null });
     } catch (error) {
-      console.error('Shim Error:', error);
+      console.error('Database Query Error:', error);
       resolve({ data: null, count: 0, error });
     }
   }

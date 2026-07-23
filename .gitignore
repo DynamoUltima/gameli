@@ -24,3 +24,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Service account / admin credentials
+service-account.json
+*-service-account.json
+*serviceAccountKey*.json

@@ -1,5 +1,7 @@
 {
-  "projects": {},
+  "projects": {
+    "default": "gameliel-hospital"
+  },
   "targets": {},
   "etags": {}
 }

@@ -6,7 +6,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList, Download, CheckCircle2 } from "lucide-react";
+import { Calendar as CalendarIcon, Video, Users, DollarSign, Clock, Hospital, Bell, Settings, LogOut, ChevronLeft, ChevronRight, CheckCircle, XCircle, AlertCircle, UserPlus, Search, ChevronDown, FilePlus, Trash2, ArrowLeft, ClipboardList, Download, CheckCircle2, ShieldCheck } from "lucide-react";
+import { labelForNationalIdType } from "@/lib/nationalIdService";
+import { groupQuestionnaire } from "@/lib/fertilityQuestions";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
@@ -14,6 +16,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/integrations/firebase/client";
 import { format } from "date-fns";
 import { useGoogleLogin } from '@react-oauth/google';
 
@@ -106,58 +110,11 @@ const DoctorDashboard = () => {
       return;
     }
 
-    // ---- Group entries into sections ----
-    const sectionPrefixes: Record<string, string> = {
-      personal_: 'Personal Information',
-      partner_: 'Partner Information',
-      referral_: 'Referral',
-      hpi_: 'History of Present Illness',
-      prev_: 'Previous Tests',
-      soc_: 'Social History',
-      sys: 'Review of Systems',
-      med_: 'Medical Notes',
-      fam_: 'Family History',
-      disease_: 'Family Diseases',
-      // Female-specific
-      menarche_: 'Gynecological History',
-      lmp_: 'Gynecological History',
-      periods_: 'Gynecological History',
-      cycle_: 'Gynecological History',
-      flow_: 'Gynecological History',
-      intermenstrual_: 'Gynecological History',
-      history_: 'Medical History',
-      female_: 'Medical History',
-      preg_: 'Pregnancy History',
-      therapy_: 'Fertility Therapy',
-      test_: 'Fertility Testing',
-      ovulation_: 'Ovulatory Dysfunction',
-      ros_: 'Review of Systems',
-      family_: 'Family History',
-    };
-
-    const sections: Record<string, { key: string; label: string; value: string }[]> = {};
-    const miscRows: { key: string; label: string; value: string }[] = [];
-
-    Object.entries(form.data as Record<string, any>).forEach(([key, value]) => {
-      if (!value && value !== 0) return;
-      const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-      const strValue = String(value);
-      let matched = false;
-      for (const [prefix, section] of Object.entries(sectionPrefixes)) {
-        if (key.startsWith(prefix)) {
-          if (!sections[section]) sections[section] = [];
-          sections[section].push({ key, label, value: strValue });
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) miscRows.push({ key, label, value: strValue });
-    });
-
-    if (miscRows.length) sections['Other'] = miscRows;
+    // ---- Group entries into sections with real question text ----
+    const sections = groupQuestionnaire(form.data);
 
     // ---- Render each section as a table ----
-    Object.entries(sections).forEach(([sectionName, rows]) => {
+    sections.forEach(({ section: sectionName, rows }) => {
       if (rows.length === 0) return;
 
       // Section heading
@@ -170,12 +127,12 @@ const DoctorDashboard = () => {
       autoTable(doc, {
         startY: y,
         margin: { left: margin, right: margin },
-        head: [['Field', 'Response']],
+        head: [['Question', 'Response']],
         body: rows.map(r => [r.label, r.value]),
         styles: { fontSize: 8.5, cellPadding: 3, textColor: [30, 41, 59] },
         headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85], fontStyle: 'bold', fontSize: 8 },
         alternateRowStyles: { fillColor: [248, 250, 252] },
-        columnStyles: { 0: { cellWidth: 70, fontStyle: 'bold' }, 1: { cellWidth: 'auto' } },
+        columnStyles: { 0: { cellWidth: 115 }, 1: { cellWidth: 'auto', fontStyle: 'bold' } },
       });
 
       y = (doc as any).lastAutoTable.finalY + 8;
@@ -403,7 +360,7 @@ const DoctorDashboard = () => {
       if (patientIds.length > 0) {
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
-          .select('id, full_name, first_name, last_name, phone')
+          .select('id, full_name, first_name, last_name, phone, national_id_type, national_id_front_url, national_id_back_url, national_id_status')
           .in('id', patientIds);
 
         if (profilesError) {
@@ -418,10 +375,28 @@ const DoctorDashboard = () => {
         }
       }
 
-      // Combine appointments with patient profiles
+      // Fetch medical forms (fertility questionnaires) directly from Firestore.
+      // The Supabase shim ignores nested selects, so the `medical_forms (...)`
+      // embed above returns nothing — pull them here and group by appointment_id.
+      const formsByAppointment = new Map<string, any[]>();
+      try {
+        const formsSnap = await getDocs(collection(db, 'medical_forms'));
+        formsSnap.forEach((docSnap) => {
+          const form = { id: docSnap.id, ...(docSnap.data() as any) };
+          if (!form.appointment_id) return;
+          const arr = formsByAppointment.get(form.appointment_id) || [];
+          arr.push(form);
+          formsByAppointment.set(form.appointment_id, arr);
+        });
+      } catch (e) {
+        console.error('Error fetching medical forms:', e);
+      }
+
+      // Combine appointments with patient profiles and their medical forms
       const appointmentsWithProfiles = appointments?.map((apt: any) => ({
         ...apt,
-        profiles: patientProfilesMap.get(apt.patient_id) || null
+        profiles: patientProfilesMap.get(apt.patient_id) || null,
+        medical_forms: formsByAppointment.get(apt.id) || []
       })) || [];
 
       console.log('=== Fetched all appointments with relations ===');
@@ -898,11 +873,14 @@ const DoctorDashboard = () => {
           .eq('doctor_id', user.uid)
           .order('created_at', { ascending: false });
 
-        // Filter in JS: include appointments created in the last 7 days,
-        // OR those missing created_at (treat them as recent to be safe)
+        // Filter in JS: include appointments created (or rebooked) in the last 7 days,
+        // OR those missing created_at (treat them as recent to be safe).
+        // A rebooking keeps its original created_at, so fall back to rebooked_at —
+        // otherwise a rescheduled older appointment never surfaces here.
         const recentAppointments = (allDoctorAppts || []).filter((apt: any) => {
-          if (!apt.created_at) return true; // include if no created_at
-          return new Date(apt.created_at) >= sevenDaysAgo;
+          const stamp = apt.rebooked_at || apt.created_at;
+          if (!stamp) return true; // include if no timestamp at all
+          return new Date(stamp) >= sevenDaysAgo;
         });
 
         if (error) throw error;
@@ -931,14 +909,19 @@ const DoctorDashboard = () => {
 
             let message = '';
             let type: 'new_appointment' | 'confirmed' | 'cancelled' | 'completed' = 'new_appointment';
+            const isRebooked = !!apt.rebooked_at;
 
             switch (apt.status) {
               case 'pending':
-                message = `New appointment request from ${patientName} for ${date} at ${time}`;
+                message = isRebooked
+                  ? `${patientName} rebooked for ${date} at ${time} — awaiting approval`
+                  : `New appointment request from ${patientName} for ${date} at ${time}`;
                 type = 'new_appointment';
                 break;
               case 'confirmed':
-                message = `Appointment with ${patientName} confirmed for ${date} at ${time}`;
+                message = isRebooked
+                  ? `${patientName} rebooked for ${date} at ${time}`
+                  : `Appointment with ${patientName} confirmed for ${date} at ${time}`;
                 type = 'confirmed';
                 break;
               case 'cancelled':
@@ -957,7 +940,7 @@ const DoctorDashboard = () => {
               id: apt.id,
               type,
               message,
-              time: apt.created_at,
+              time: apt.rebooked_at || apt.created_at,
               appointment: apt
             };
           })
@@ -1071,7 +1054,9 @@ const DoctorDashboard = () => {
       // Get date string from appointment's scheduled_at (YYYY-MM-DD format)
       const aptDateStr = getDateString(apt.scheduled_at);
 
-      // Compare date strings directly - include ALL statuses (pending, confirmed, completed, cancelled)
+      // Compare date strings directly. allAppointments is already scoped to the
+      // confirmed/completed statuses the doctor is meant to see (see the fetch above),
+      // so no further status filtering is needed here.
       const match = aptDateStr === targetDateStr;
 
       if (match) {
@@ -2165,6 +2150,54 @@ const DoctorDashboard = () => {
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                     </div>
                   </div>
+
+                  {/* Patient identification — home visits only (staff safety verification) */}
+                  {selectedAppointmentId && (() => {
+                    const apt = allAppointments.find(a => a.id === selectedAppointmentId);
+                    if (!apt || apt.type !== 'home') return null;
+                    const p = apt.profiles || {};
+                    // Prefer the profile-level national ID; fall back to the legacy per-appointment image
+                    const frontUrl = p.national_id_front_url || apt.ghana_card_url || null;
+                    const backUrl = p.national_id_back_url || null;
+                    if (!frontUrl) {
+                      return (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 p-3 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" /> No national ID on file for this patient.
+                        </div>
+                      );
+                    }
+                    const status = p.national_id_status || null;
+                    return (
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                            {labelForNationalIdType(p.national_id_type)}
+                          </span>
+                          {status === 'verified' ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-700 dark:text-green-400"><CheckCircle2 className="w-3.5 h-3.5" /> Verified</span>
+                          ) : status === 'rejected' ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 dark:text-red-400"><XCircle className="w-3.5 h-3.5" /> Rejected</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400"><Clock className="w-3.5 h-3.5" /> Pending review</span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <a href={frontUrl} target="_blank" rel="noopener noreferrer" className="block flex-1">
+                            <img src={frontUrl} alt="ID front" className="w-full h-24 object-cover rounded-md border border-slate-200 dark:border-slate-700" />
+                            <span className="block text-[10px] text-center text-muted-foreground mt-1">Front</span>
+                          </a>
+                          {backUrl && (
+                            <a href={backUrl} target="_blank" rel="noopener noreferrer" className="block flex-1">
+                              <img src={backUrl} alt="ID back" className="w-full h-24 object-cover rounded-md border border-slate-200 dark:border-slate-700" />
+                              <span className="block text-[10px] text-center text-muted-foreground mt-1">Back</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-2 flex-1 flex flex-col">
                     <label className="block text-xs font-medium text-muted-foreground">Consultation Notes</label>
                     {selectedAppointmentId && (() => {
@@ -2387,27 +2420,31 @@ const DoctorDashboard = () => {
             Status: <span className="capitalize font-medium">{viewingForm?.status || 'submitted'}</span>
           </p>
         </DialogHeader>
-        <ScrollArea className="flex-1 -mx-6 px-6">
-          {viewingForm?.data && Object.keys(viewingForm.data).length > 0 ? (
-            <div className="space-y-1 pb-4">
-              {Object.entries(viewingForm.data as Record<string, any>).map(([key, value]) => {
-                if (!value && value !== 0) return null;
-                // Convert snake_case key to readable label
-                const label = key
-                  .replace(/_/g, ' ')
-                  .replace(/\b\w/g, (c) => c.toUpperCase());
-                return (
-                  <div key={key} className="flex gap-4 py-2.5 border-b border-border/40 last:border-0">
-                    <span className="text-xs font-medium text-muted-foreground w-48 shrink-0 leading-relaxed">{label}</span>
-                    <span className="text-sm text-foreground leading-relaxed capitalize">{String(value)}</span>
+        <div className="flex-1 min-h-0 overflow-y-auto -mx-6 px-6">
+          {(() => {
+            const sections = groupQuestionnaire(viewingForm?.data);
+            if (sections.length === 0) {
+              return <div className="text-center py-8 text-muted-foreground text-sm">No responses recorded in this questionnaire.</div>;
+            }
+            return (
+              <div className="space-y-6 pb-4">
+                {sections.map((sec) => (
+                  <div key={sec.section}>
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">{sec.section}</h4>
+                    <div className="space-y-0">
+                      {sec.rows.map((row) => (
+                        <div key={row.key} className="flex gap-4 py-2.5 border-b border-border/40 last:border-0">
+                          <span className="text-xs font-medium text-muted-foreground flex-1 leading-relaxed">{row.label}</span>
+                          <span className="text-sm text-foreground leading-relaxed text-right shrink-0 max-w-[45%]">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground text-sm">No responses recorded in this questionnaire.</div>
-          )}
-        </ScrollArea>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
 
         {/* Download PDF Button */}
         <div className="pt-4 border-t border-border mt-2 flex justify-end">

@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { sendEmail } from "@/lib/emailService";
 import { sendSms } from "@/lib/smsService";
 import { format } from "date-fns";
+import { computePaymentExpiry } from "@/lib/paymentValidity";
 import { usePaystackPayment } from "react-paystack";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -44,10 +45,16 @@ const Payment = () => {
     setProcessing(true);
     try {
       if (appointmentId) {
-        // Update to paid
+        // Update to paid — record when payment happened and when it expires so
+        // the 3-month validity can be tracked (not recomputed from "now").
+        const paidAt = new Date();
         const { error: updateErr } = await supabase
           .from('appointments' as any)
-          .update({ payment_status: 'paid' })
+          .update({
+            payment_status: 'paid',
+            paid_at: paidAt.toISOString(),
+            payment_expires_at: computePaymentExpiry(paidAt),
+          })
           .eq('id', appointmentId);
         
         if (updateErr) throw updateErr;

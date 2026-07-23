@@ -16,6 +16,7 @@ import Auth from "./pages/Auth";
 import DoctorSchedulesPage from "./pages/DoctorSchedulesPage";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import Faq from "./pages/Faq";
 
 import { GoogleOAuthProvider } from '@react-oauth/google';
 
@@ -70,6 +71,7 @@ const App = () => (
           <Route path="/auth" element={<Auth />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms-of-service" element={<TermsOfService />} />
+          <Route path="/faq" element={<Faq />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

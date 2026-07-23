@@ -27,7 +27,7 @@ export function LandingFooter() {
                             </a>
                         </div>
                     </div>
-                    <div className="lg:col-span-2 lg:col-start-7 flex flex-col gap-4">
+                    <div className="lg:col-span-2 lg:col-start-5 flex flex-col gap-4">
                         <h4 className="text-xs font-semibold text-white tracking-widest uppercase mb-2">
                             Services
                         </h4>
@@ -43,6 +43,23 @@ export function LandingFooter() {
                         <a href="#" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
                             Pharmacy
                         </a>
+                    </div>
+                    <div className="lg:col-span-2 flex flex-col gap-4">
+                        <h4 className="text-xs font-semibold text-white tracking-widest uppercase mb-2">
+                            FAQs
+                        </h4>
+                        <Link to="/faq" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
+                            How to book
+                        </Link>
+                        <Link to="/faq" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
+                            Payments & refunds
+                        </Link>
+                        <Link to="/faq" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
+                            Rescheduling
+                        </Link>
+                        <Link to="/faq" className="text-white/70 hover:text-white transition-colors text-sm font-medium">
+                            Online consultations
+                        </Link>
                     </div>
                     <div className="lg:col-span-2 flex flex-col gap-4">
                         <h4 className="text-xs font-semibold text-white tracking-widest uppercase mb-2">

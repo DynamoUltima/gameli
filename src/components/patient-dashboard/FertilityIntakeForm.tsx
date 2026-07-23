@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Building2, Info, Loader2, Send, ArrowLeft, Check } from 'lucide-react';
+import { FemaleFertilityIntakeForm } from './FemaleFertilityIntakeForm';
 
 interface FertilityIntakeFormProps {
   formId: string;
@@ -173,8 +174,22 @@ export const FertilityIntakeForm: React.FC<FertilityIntakeFormProps> = ({
   onSubmit,
   isSubmitting
 }) => {
-  const title = formType === 'male_fertility' ? 'Male Fertility Questionnaire' : 
-                formType === 'female_fertility' ? 'Female Fertility Questionnaire' : 
+  // The female questionnaire is a distinct form (gynecological, pregnancy,
+  // fertility & ovulatory sections) — render its dedicated component.
+  if (formType === 'female_fertility') {
+    return (
+      <FemaleFertilityIntakeForm
+        formId={formId}
+        formType={formType}
+        onBack={onBack}
+        onSubmit={onSubmit}
+        isSubmitting={isSubmitting}
+      />
+    );
+  }
+
+  const title = formType === 'male_fertility' ? 'Male Fertility Questionnaire' :
+                formType === 'female_fertility' ? 'Female Fertility Questionnaire' :
                 'Couple Fertility Questionnaire';
                 
   const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {

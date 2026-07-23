@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { ThemeProvider } from "next-themes";
 import { supabase } from "@/integrations/supabase/client";
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '@/integrations/firebase/client';
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -9,6 +9,9 @@ import { PatientNav } from "@/components/patient-dashboard/PatientNav";
 import { PatientQuickActions } from "@/components/patient-dashboard/PatientQuickActions";
 import { PatientAppointments } from "@/components/patient-dashboard/PatientAppointments";
 import { PatientProfileCard } from "@/components/patient-dashboard/PatientProfileCard";
+import { PatientIdentification } from "@/components/patient-dashboard/PatientIdentification";
+import { PatientQuestionnaires } from "@/components/patient-dashboard/PatientQuestionnaires";
+import { fetchNationalId, type NationalIdRecord } from "@/lib/nationalIdService";
 import { PatientBookingModal } from "@/components/patient-dashboard/PatientBookingModal";
 import { PatientAppointmentHistoryModal } from "@/components/patient-dashboard/PatientAppointmentHistoryModal";
 import { FertilityIntakeForm } from "@/components/patient-dashboard/FertilityIntakeForm";
@@ -51,10 +54,14 @@ const PatientDashboard = () => {
     hospital_card_id: ""
   });
 
+  // Saved national ID (for home visit verification)
+  const [nationalId, setNationalId] = useState<NationalIdRecord | null>(null);
+
   // Edit profile dialog state
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editFormData, setEditFormData] = useState({
+    full_name: "",
     phone: "",
     gender: "",
     date_of_birth: ""
@@ -74,6 +81,10 @@ const PatientDashboard = () => {
   const [activeView, setActiveView] = useState<'dashboard' | 'form'>('dashboard');
   const [activeFormDetails, setActiveFormDetails] = useState<{id: string, type: string} | null>(null);
   const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+  // All medical questionnaires assigned to this patient (for the dashboard card)
+  const [medicalForms, setMedicalForms] = useState<any[]>([]);
+  // Guards the one-time auto-open of a form via the ?openForm email link
+  const openFormHandledRef = useRef(false);
 
   const handleOpenBooking = (type: string = 'online') => {
     setBookingType(type);
@@ -121,6 +132,10 @@ const PatientDashboard = () => {
           hospital_card_id: profile.hospital_card_id ?? ""
         });
       }
+
+      // Load saved national ID (for home visit verification)
+      const savedId = await fetchNationalId(user.uid);
+      setNationalId(savedId);
     };
     loadProfile();
   }, [user?.uid]);
@@ -377,6 +392,50 @@ const PatientDashboard = () => {
     fetchNotifications();
   }, [fetchNotifications]);
 
+  // Fetch ALL of the patient's questionnaires (no date cutoff) for the dashboard card
+  const fetchMedicalForms = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const q = query(collection(db, 'medical_forms'), where('patient_id', '==', user.uid));
+      const snapshot = await getDocs(q);
+      const forms = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      forms.sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
+      setMedicalForms(forms);
+    } catch (error) {
+      console.error('Error fetching medical forms:', error);
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
+    fetchMedicalForms();
+  }, [fetchMedicalForms]);
+
+  const openForm = useCallback((formId: string, formType: string) => {
+    setActiveFormDetails({ id: formId, type: formType });
+    setActiveView('form');
+  }, []);
+
+  // Auto-open the pending questionnaire when the patient arrives via the ?openForm email link
+  useEffect(() => {
+    if (openFormHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('openForm')) return;
+    const pending = medicalForms.filter((f) => f.status === 'pending');
+    if (pending.length === 0) return;
+    // medicalForms is sorted newest-first, so the last pending entry is the oldest — open that one first.
+    const target = pending[pending.length - 1];
+    openFormHandledRef.current = true;
+    openForm(target.id, target.form_type || '');
+    // Strip the param so a refresh/back doesn't re-trigger the auto-open.
+    const url = new URL(window.location.href);
+    url.searchParams.delete('openForm');
+    window.history.replaceState({}, '', url.toString());
+  }, [medicalForms, openForm]);
+
   const initials = useMemo(() => {
     if (!fullName) return "";
     const parts = fullName.trim().split(/\s+/);
@@ -384,8 +443,10 @@ const PatientDashboard = () => {
   }, [fullName]);
 
   const formatRelativeTime = (timestamp: string) => {
+    if (!timestamp) return '';
     const now = new Date();
     const past = new Date(timestamp);
+    if (isNaN(past.getTime())) return '';
     const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000);
 
     if (diffInSeconds < 60) return 'Just now';
@@ -419,6 +480,7 @@ const PatientDashboard = () => {
 
   const handleEditProfile = () => {
     setEditFormData({
+      full_name: fullName,
       phone: profileData.phone,
       gender: profileData.gender,
       date_of_birth: profileData.date_of_birth
@@ -430,9 +492,18 @@ const PatientDashboard = () => {
     if (!user?.uid) return;
     setEditingProfile(true);
     try {
+      const parts = (editFormData.full_name || '').trim().split(/\s+/);
+      const first_name = parts[0] || '';
+      const last_name = parts.length > 1 ? parts[parts.length - 1] : '';
+      const other_name = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
+
       const { error } = await supabase
         .from('profiles')
         .update({
+          full_name: editFormData.full_name.trim() || null,
+          first_name: first_name || null,
+          last_name: last_name || null,
+          other_name: other_name || null,
           phone: editFormData.phone.trim() || null,
           gender: editFormData.gender || null,
           date_of_birth: editFormData.date_of_birth || null
@@ -447,6 +518,7 @@ const PatientDashboard = () => {
         gender: editFormData.gender,
         date_of_birth: editFormData.date_of_birth
       }));
+      setFullName(editFormData.full_name.trim());
 
       toast.success("Profile updated successfully!");
       setEditProfileOpen(false);
@@ -511,8 +583,7 @@ const PatientDashboard = () => {
 
   const handleNotificationClick = (notification: Notification) => {
     if (notification.isForm && notification.formStatus === 'pending') {
-      setActiveFormDetails({ id: notification.formId!, type: notification.formType! });
-      setActiveView('form');
+      openForm(notification.formId!, notification.formType!);
     }
   };
 
@@ -521,11 +592,13 @@ const PatientDashboard = () => {
     
     setIsSubmittingForm(true);
     try {
+      const submittedAt = new Date().toISOString();
       const { error } = await supabase
         .from('medical_forms')
         .update({
           status: 'submitted',
-          data: formData
+          data: formData,
+          submitted_at: submittedAt
         })
         .eq('id', activeFormDetails.id);
         
@@ -536,10 +609,14 @@ const PatientDashboard = () => {
       
       // Refresh notifications to update form status
       setUnreadCount(prev => Math.max(0, prev - 1));
-      setNotifications(prev => prev.map(n => 
-        n.formId === activeFormDetails.id 
-          ? { ...n, type: 'completed', formStatus: 'submitted', message: 'Medical form submitted. All information provided.' } 
+      setNotifications(prev => prev.map(n =>
+        n.formId === activeFormDetails.id
+          ? { ...n, type: 'completed', formStatus: 'submitted', message: 'Medical form submitted. All information provided.' }
           : n
+      ));
+      // Update the questionnaires card so the form flips to "Submitted"
+      setMedicalForms(prev => prev.map(f =>
+        f.id === activeFormDetails.id ? { ...f, status: 'submitted', data: formData, submitted_at: submittedAt } : f
       ));
     } catch (error: any) {
       console.error('Error submitting form:', error);
@@ -601,7 +678,8 @@ const PatientDashboard = () => {
               onRebook={handleRebook}
             />
           </div>
-          <div>
+          <div className="space-y-6 sm:space-y-8">
+            <PatientQuestionnaires forms={medicalForms} onOpenForm={openForm} />
             <PatientProfileCard
               fullName={fullName}
               initials={initials}
@@ -610,6 +688,13 @@ const PatientDashboard = () => {
               onEditProfile={handleEditProfile}
               onSignOut={signOut}
             />
+            {user?.uid && (
+              <PatientIdentification
+                uid={user.uid}
+                nationalId={nationalId}
+                onSaved={setNationalId}
+              />
+            )}
           </div>
         </div>
           </>
@@ -619,7 +704,7 @@ const PatientDashboard = () => {
       <PatientBookingModal
         isOpen={isBookingModalOpen}
         onClose={() => setIsBookingModalOpen(false)}
-        onBookingSuccess={() => { fetchAppointments(); fetchNotifications(); }}
+        onBookingSuccess={() => { fetchAppointments(); fetchNotifications(); fetchMedicalForms(); }}
         bookingType={bookingType}
         patientName={fullName}
         patientPhone={profileData.phone}
@@ -646,6 +731,16 @@ const PatientDashboard = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Full Name</Label>
+              <Input
+                id="edit-name"
+                placeholder="Full Name"
+                value={editFormData.full_name}
+                onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })}
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="edit-phone">Phone Number</Label>
               <Input

@@ -7,6 +7,7 @@ import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
+import { getPaymentValidity } from "@/lib/paymentValidity";
 import jsPDF from "jspdf";
 
 interface AppointmentDetails {
@@ -19,6 +20,7 @@ interface AppointmentDetails {
   patientName: string;
   patientEmail: string;
   patientPhone: string;
+  expiresAt: string | null; // ISO — 3-month payment expiry anchored to payment date
 }
 
 const PaymentSuccess = () => {
@@ -70,6 +72,10 @@ const PaymentSuccess = () => {
           searchParams.get("amount") ||
           (appt.type === "online" ? "150" : "200");
 
+        // Payment expiry is anchored to the actual payment date (recorded on the
+        // appointment), falling back to created_at for legacy bookings — never "now".
+        const validity = getPaymentValidity(appt);
+
         setDetails({
           id: appt.id,
           scheduled_at: appt.scheduled_at,
@@ -80,6 +86,7 @@ const PaymentSuccess = () => {
           patientName: patient?.full_name || "Patient",
           patientEmail: patient?.email || "",
           patientPhone: patient?.phone || "",
+          expiresAt: validity.expiresAt ? validity.expiresAt.toISOString() : null,
         });
       } catch (err) {
         console.error("Error fetching appointment details:", err);
@@ -203,6 +210,10 @@ const PaymentSuccess = () => {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 100, 100);
     doc.text("Payment Status: PAID ✓", 22, y + 21);
+    const expiryDate = details.expiresAt
+      ? format(new Date(details.expiresAt), "MMMM do, yyyy")
+      : "N/A";
+    doc.text(`Valid Until: ${expiryDate}`, pageWidth - 22, y + 21, { align: "right" });
 
     // — Footer —
     const footerY = 270;
@@ -217,9 +228,15 @@ const PaymentSuccess = () => {
       { align: "center" }
     );
     doc.text(
-      "Thank you for choosing Gameliel Hospital for your healthcare needs.",
+      `Thank you for booking. This payment is valid for 3 months and expires on ${expiryDate}.`,
       pageWidth / 2,
       footerY + 15,
+      { align: "center" }
+    );
+    doc.text(
+      "Please reschedule any missed appointment before this date to avoid forfeiting your payment.",
+      pageWidth / 2,
+      footerY + 21,
       { align: "center" }
     );
 
@@ -283,6 +300,15 @@ const PaymentSuccess = () => {
                 <div>
                   <p className="text-muted-foreground">Amount Paid</p>
                   <p className="font-medium text-success">GHS {details.amount}</p>
+                </div>
+                <div className="col-span-2 mt-1 rounded-md bg-amber-500/10 border border-amber-500/20 p-3">
+                  <p className="text-amber-700 dark:text-amber-400 text-xs">
+                    This payment is valid for 3 months and expires on{" "}
+                    <span className="font-semibold">
+                      {details.expiresAt ? format(new Date(details.expiresAt), "MMMM do, yyyy") : "N/A"}
+                    </span>
+                    . Please reschedule any missed appointment before this date to avoid forfeiting your payment.
+                  </p>
                 </div>
               </div>
             ) : (

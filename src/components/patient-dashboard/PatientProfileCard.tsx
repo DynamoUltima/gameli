@@ -23,8 +23,8 @@ export const PatientProfileCard = ({
     onSignOut
 }: PatientProfileCardProps) => {
     return (
-        <div className="flex flex-col h-full">
-            <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] border border-slate-200 dark:border-slate-800 p-6 sm:p-8 flex-1 flex flex-col shadow-sm">
+        <div className="flex flex-col">
+            <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] border border-slate-200 dark:border-slate-800 p-6 sm:p-8 flex flex-col shadow-sm">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-8 border-b border-slate-100 dark:border-slate-800 pb-6">
                     <h2 className="text-lg font-medium tracking-tight text-slate-900 dark:text-white">
@@ -56,7 +56,7 @@ export const PatientProfileCard = ({
                 </div>
 
                 {/* Details List */}
-                <div className="space-y-1 flex-1">
+                <div className="space-y-1">
                     <div className="flex justify-between items-center py-3.5 border-b border-slate-50 dark:border-slate-800/50">
                         <span className="text-sm font-normal text-slate-500 dark:text-slate-400">Age</span>
                         <span className="text-sm font-medium text-slate-900 dark:text-slate-200">

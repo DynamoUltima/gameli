@@ -163,33 +163,33 @@ const Auth = () => {
       return;
     }
 
-    // Check if email is already registered in Firestore
-    const emailQuery = query(
-      collection(db, 'users'),
-      where('email', '==', registerData.email.trim().toLowerCase())
-    );
-    const emailSnapshot = await getDocs(emailQuery);
-    if (!emailSnapshot.empty) {
-      toast.error("An account with this email address already exists. Please sign in or use a different email.");
-      return;
-    }
-
-    if (registerData.hospitalCardId.trim()) {
-      const q = query(
-        collection(db, 'users'), 
-        where('hospital_card_id', '==', registerData.hospitalCardId.trim())
-      );
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        toast.error("This hospital card ID is already registered. Please contact the hospital if you believe this is an error.");
-        return;
-      }
-    }
-
     setIsLoading(true);
 
     try {
+      // Check if email is already registered in Firestore
+      const emailQuery = query(
+        collection(db, 'users'),
+        where('email', '==', registerData.email.trim().toLowerCase())
+      );
+      const emailSnapshot = await getDocs(emailQuery);
+      if (!emailSnapshot.empty) {
+        toast.error("An account with this email address already exists. Please sign in or use a different email.");
+        return;
+      }
+
+      if (registerData.hospitalCardId.trim()) {
+        const q = query(
+          collection(db, 'users'), 
+          where('hospital_card_id', '==', registerData.hospitalCardId.trim())
+        );
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          toast.error("This hospital card ID is already registered. Please contact the hospital if you believe this is an error.");
+          return;
+        }
+      }
+
       const userCredential = await createUserWithEmailAndPassword(
         auth, 
         registerData.email, 

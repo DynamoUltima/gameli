@@ -4,9 +4,18 @@ const { defineSecret } = require("firebase-functions/params");
 const sendgridApiKey = defineSecret("SENDGRID_API_KEY");
 
 const SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send";
-const SENDER_EMAIL = "support@gamalielshospital.com";
+const SENDER_EMAIL = "admin@gamalielshospital.com";
 const SENDER_NAME = "St. Gamaliel's Hospital";
 const HOSPITAL_NAME = "St. Gamaliel's Hospital";
+
+// Admin emails that receive CC copies of payment-related notifications
+const ADMIN_NOTIFICATION_EMAILS = [
+  "admin@stgamalielshospital.com",
+  "dynamo.joey@outlook.com",
+];
+
+// Email types that admins should be CC'd on
+const ADMIN_CC_TYPES = ["payment_receipt", "appointment_confirmation"];
 
 // ─── SMS Function ─────────────────────────────────────────────────────────────
 
@@ -232,6 +241,14 @@ exports.sendEmail = onRequest({ cors: true, region: "europe-west1", invoker: "pu
       return;
     }
 
+    // Build CC list for admin-monitored email types, excluding the primary recipient
+    const ccList = ADMIN_CC_TYPES.includes(type)
+      ? ADMIN_NOTIFICATION_EMAILS.filter((email) => email !== to).map((email) => ({ email }))
+      : [];
+
+    const personalization = { to: [{ email: to }] };
+    if (ccList.length > 0) personalization.cc = ccList;
+
     const sgResponse = await fetch(SENDGRID_API_URL, {
       method: "POST",
       headers: {
@@ -239,7 +256,7 @@ exports.sendEmail = onRequest({ cors: true, region: "europe-west1", invoker: "pu
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
+        personalizations: [personalization],
         from: { email: SENDER_EMAIL, name: SENDER_NAME },
         subject,
         content: [{ type: "text/html", value: html }],

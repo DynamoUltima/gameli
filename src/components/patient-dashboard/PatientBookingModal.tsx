@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { sendEmail } from "@/lib/emailService";
 import { sendSms } from "@/lib/smsService";
 import { getFirebaseErrorMessage } from "@/lib/firebaseErrors";
+import { computePaymentExpiry } from "@/lib/paymentValidity";
 import {
     X,
     CheckCircle,
@@ -13,7 +14,8 @@ import {
     CreditCard,
     CheckCircle2,
     Download,
-    ArrowRight
+    ArrowRight,
+    ShieldCheck
 } from 'lucide-react';
 import { useDoctors } from '@/hooks/useDoctors';
 import { useDoctorSchedules } from '@/hooks/useDoctorSchedules';
@@ -23,6 +25,17 @@ import { format, parse, addMinutes, isBefore, isSameDay, startOfDay } from "date
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { usePaystackPayment } from "react-paystack";
+import {
+    NATIONAL_ID_TYPES,
+    type NationalIdRecord,
+    type NationalIdType,
+    labelForNationalIdType,
+    nationalIdRequiresBack,
+    uploadNationalId,
+    saveNationalIdToProfile,
+    fetchNationalId,
+    validateIdImage,
+} from "@/lib/nationalIdService";
 
 interface PatientBookingModalProps {
     isOpen: boolean;
@@ -62,6 +75,16 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
     const [otherPatientName, setOtherPatientName] = useState("");
     const [otherPatientPhone, setOtherPatientPhone] = useState("");
     const [relationship, setRelationship] = useState("");
+
+    // National ID of the person the home visit is for — security verification.
+    // Saved to the profile and reused; only prompt for upload when none is saved (or they replace it).
+    const [savedNationalId, setSavedNationalId] = useState<NationalIdRecord | null>(null);
+    const [replacingId, setReplacingId] = useState(false);
+    const [idType, setIdType] = useState<NationalIdType>("ghana_card");
+    const [idFrontFile, setIdFrontFile] = useState<File | null>(null);
+    const [idBackFile, setIdBackFile] = useState<File | null>(null);
+    const [idFrontPreview, setIdFrontPreview] = useState<string>("");
+    const [idBackPreview, setIdBackPreview] = useState<string>("");
 
     const [preferredDoctor, setPreferredDoctor] = useState("");
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
@@ -103,6 +126,18 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
         setPersonalPhone(patientPhone || "");
         setPersonalEmail(patientEmail || "");
     }, [patientName, patientPhone, patientEmail]);
+
+    // Load any saved national ID so home-visit bookings can reuse it
+    useEffect(() => {
+        const loadSavedId = async () => {
+            const uid = (user as any)?.uid || (user as any)?.id;
+            if (!isOpen || !uid) return;
+            const savedId = await fetchNationalId(uid);
+            setSavedNationalId(savedId);
+            if (savedId?.national_id_type) setIdType(savedId.national_id_type);
+        };
+        loadSavedId();
+    }, [isOpen, user]);
 
     useEffect(() => {
         const fetchAvailability = async () => {
@@ -161,6 +196,34 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedDate, preferredDoctor, getAvailableSlots, bookingType]);
 
+    const hasSavedId = !!savedNationalId?.national_id_front_url;
+    const showIdUploadForm = !hasSavedId || replacingId;
+    const idRequiresBack = nationalIdRequiresBack(idType);
+    // Whether the home-visit ID requirement is satisfied for this booking.
+    const idRequirementMet =
+        (hasSavedId && !replacingId) ||
+        (!!idFrontFile && (!idRequiresBack || !!idBackFile));
+
+    const handleIdFileChange = (
+        setFile: (f: File | null) => void,
+        setPreview: (s: string) => void
+    ) => (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) {
+            setFile(null);
+            setPreview("");
+            return;
+        }
+        const err = validateIdImage(file);
+        if (err) {
+            toast({ title: "Invalid file", description: err, variant: "destructive" });
+            e.target.value = "";
+            return;
+        }
+        setFile(file);
+        setPreview(URL.createObjectURL(file));
+    };
+
     const processBookingSuccess = async (paymentReference?: any) => {
         setIsSubmitting(true);
         try {
@@ -177,11 +240,53 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                 scheduledAt = dateObj.toISOString();
             }
             
+            // National ID for home visits (security verification of the patient).
+            // If a new ID was uploaded, save it to the profile so it's reused next time;
+            // otherwise reuse the ID already saved on the profile.
+            const uid = (user as any)?.uid || (user as any)?.id || 'anon';
+            let ghanaCardUrl: string | null = savedNationalId?.national_id_front_url || null;
+            if (bookingType === 'home' && idFrontFile) {
+                const uploaded = await uploadNationalId({
+                    uid,
+                    type: idType,
+                    frontFile: idFrontFile,
+                    backFile: idBackFile,
+                });
+                await saveNationalIdToProfile(uid, {
+                    national_id_type: idType,
+                    national_id_front_url: uploaded.national_id_front_url,
+                    national_id_back_url: uploaded.national_id_back_url,
+                });
+                ghanaCardUrl = uploaded.national_id_front_url;
+            }
+            if (bookingType !== 'home') ghanaCardUrl = null;
+
+            const ghanaCardHolder = bookingType === 'home'
+                ? (isBookingForOther ? otherPatientName : `${firstName} ${lastName}`.trim())
+                : null;
+
             let appt;
             let apptErr;
 
             if (rebookingAppointment) {
-                const { data, error } = await supabase
+                // A rebooking reschedules an appointment that is already paid for, so it
+                // keeps the approval it already had — otherwise it would drop back to
+                // "pending" and disappear from the doctor's calendar, which only shows
+                // confirmed/completed appointments. Online consultations are auto-confirmed
+                // (payment is the approval, same as a fresh booking); a hospital/home visit
+                // that was never approved still waits on the admin.
+                const rebookStatus =
+                    (bookingType === 'online' || rebookingAppointment.status === 'confirmed')
+                        ? 'confirmed'
+                        : 'pending';
+
+                const baseSymptoms = bookingType === 'home'
+                    ? "Home visit booking"
+                    : bookingType === 'hospital'
+                        ? "Hospital visit booking"
+                        : "Online consultation booking";
+
+                const { error } = await supabase
                     .from('appointments' as any)
                     .update({
                         doctor_id: preferredDoctor,
@@ -189,13 +294,14 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                         specialty_id: clinic || null,
                         type: bookingType,
                         scheduled_at: scheduledAt ?? new Date().toISOString(),
-                        symptoms: "Online consultation booking (Rebooked)",
-                        status: "pending"
+                        symptoms: `${baseSymptoms} (Rebooked)`,
+                        status: rebookStatus,
+                        rebooked_at: new Date().toISOString(),
                     })
-                    .eq('id', rebookingAppointment.id)
-                    .select('id, doctor_id, scheduled_at')
-                    .maybeSingle();
-                appt = data;
+                    .eq('id', rebookingAppointment.id);
+                // The Firestore shim resolves updates with `data: null`, so carry the id
+                // forward ourselves — downstream steps (receipt id, fertility forms) need it.
+                appt = error ? null : { id: rebookingAppointment.id };
                 apptErr = error;
             } else {
                 const { data, error } = await supabase
@@ -212,7 +318,13 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                         // hospital & home visits always start pending — admin must confirm
                         // online consultations with payment are auto-confirmed
                         status: (bookingType === 'online' && paymentReference) ? "confirmed" : "pending",
-                        payment_status: paymentReference ? "paid" : "pending"
+                        payment_status: paymentReference ? "paid" : "pending",
+                        // Record the payment moment + 3-month expiry so validity is
+                        // tracked, not recomputed from "now" each time it's viewed.
+                        paid_at: paymentReference ? new Date().toISOString() : null,
+                        payment_expires_at: paymentReference ? computePaymentExpiry() : null,
+                        ghana_card_url: ghanaCardUrl,
+                        ghana_card_holder: ghanaCardHolder,
                     })
                     .select('id, doctor_id, scheduled_at')
                     .maybeSingle();
@@ -269,24 +381,29 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
             }
             
             if (isFertility && appt) {
-                const formType = consultationFor === 'couple' ? 
-                    (patientGender === 'female' ? 'female_fertility' : 'male_fertility') : 
-                    (patientGender === 'female' ? 'female_fertility' : 'male_fertility');
+                const formType = patientGender === 'female' ? 'female_fertility' : 'male_fertility';
                 const partnerFormType = patientGender === 'female' ? 'male_fertility' : 'female_fertility';
-                
+
+                // For a couple, create BOTH questionnaires (male + female) so both
+                // partners' forms show on the dashboard and to the doctor/admin.
+                const formTypesToCreate = consultationFor === 'couple'
+                    ? [formType, partnerFormType]
+                    : [formType];
+
                 const { error: formErr } = await supabase
                     .from('medical_forms' as any)
-                    .insert({
+                    .insert(formTypesToCreate.map((ft) => ({
                         appointment_id: (appt as any).id,
                         patient_id: (user as any)?.uid || (user as any)?.id,
-                        form_type: formType,
-                        status: 'pending'
-                    });
-                    
+                        form_type: ft,
+                        status: 'pending',
+                        created_at: new Date().toISOString()
+                    })));
+
                 if (formErr) {
                     console.error("Failed to create medical form:", formErr);
                 } else {
-                    const formLink = `${window.location.origin}/dashboard/patient`;
+                    const formLink = `${window.location.origin}/dashboard/patient?openForm=1`;
                     const fertilityFormData = {
                         patientEmail: personalEmail || patientEmail,
                         patientPhone: isBookingForOther ? otherPatientPhone : (personalPhone || patientPhone),
@@ -333,6 +450,16 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
         if (currentStep === 1) {
             const form = document.getElementById('personalForm') as HTMLFormElement;
             if (form && !form.checkValidity()) { form.reportValidity(); return; }
+            if (bookingType === 'home' && !idRequirementMet) {
+                toast({
+                    title: "National ID required",
+                    description: idRequiresBack
+                        ? "Please upload the front and back of the patient's Ghana Card."
+                        : "Please upload the patient's national ID for the home visit.",
+                    variant: "destructive",
+                });
+                return;
+            }
         } else if (currentStep === 2) {
             const form = document.getElementById('medicalForm') as HTMLFormElement;
             if (form && !form.checkValidity()) { form.reportValidity(); return; }
@@ -394,6 +521,11 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
             setOtherPatientName("");
             setOtherPatientPhone("");
             setRelationship("");
+            setReplacingId(false);
+            setIdFrontFile(null);
+            setIdBackFile(null);
+            setIdFrontPreview("");
+            setIdBackPreview("");
         }, 300);
     };
 
@@ -643,6 +775,109 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                )}
+
+                                {/* National ID — only for home visits (security verification) */}
+                                {bookingType === 'home' && (
+                                    <div className="space-y-3 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 animate-fade-in">
+                                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300 tracking-tight flex items-center gap-2">
+                                            <ShieldCheck className="w-4 h-4 text-amber-600" />
+                                            Patient's National ID <span className="text-red-500">*</span>
+                                        </label>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                                            For the safety of our visiting staff, we need a valid national ID
+                                            (Ghana Card, Voter's ID or Driving License) for{" "}
+                                            <span className="font-medium text-slate-700 dark:text-slate-300">
+                                                {isBookingForOther
+                                                    ? (otherPatientName.trim() || "the person being booked for")
+                                                    : "the person receiving the visit"}
+                                            </span>.
+                                        </p>
+
+                                        {/* Reuse the ID already saved on the patient's profile */}
+                                        {hasSavedId && !replacingId && (
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900">
+                                                    {savedNationalId?.national_id_front_url && (
+                                                        <img
+                                                            src={savedNationalId.national_id_front_url}
+                                                            alt="Saved ID"
+                                                            className="h-14 w-20 rounded object-cover border"
+                                                        />
+                                                    )}
+                                                    <div className="flex-1 text-sm">
+                                                        <p className="font-medium text-slate-700 dark:text-slate-200">{labelForNationalIdType(savedNationalId?.national_id_type)} on file</p>
+                                                        <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">
+                                                            Status: {savedNationalId?.national_id_status || "pending"}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setReplacingId(true)}
+                                                    className="text-xs font-medium text-amber-700 dark:text-amber-400 underline"
+                                                >
+                                                    Upload a different ID
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Upload / replace form */}
+                                        {showIdUploadForm && (
+                                            <div className="space-y-3">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400">ID type</label>
+                                                    <select
+                                                        value={idType}
+                                                        onChange={(e) => setIdType(e.target.value as NationalIdType)}
+                                                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
+                                                    >
+                                                        {NATIONAL_ID_TYPES.map((t) => (
+                                                            <option key={t.value} value={t.value}>{t.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                <div className="space-y-1.5">
+                                                    <label className="text-xs font-medium text-slate-600 dark:text-slate-400">{idRequiresBack ? "Front of card" : "ID image"}</label>
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        onChange={handleIdFileChange(setIdFrontFile, setIdFrontPreview)}
+                                                        className="block w-full text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-900 file:text-white dark:file:bg-white dark:file:text-slate-900 hover:file:opacity-90 file:cursor-pointer cursor-pointer"
+                                                    />
+                                                    {idFrontPreview && (
+                                                        <img src={idFrontPreview} alt="ID front preview" className="mt-2 max-h-40 rounded-lg border border-slate-200 dark:border-slate-700 object-contain" />
+                                                    )}
+                                                </div>
+
+                                                {idRequiresBack && (
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Back of card</label>
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handleIdFileChange(setIdBackFile, setIdBackPreview)}
+                                                            className="block w-full text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-900 file:text-white dark:file:bg-white dark:file:text-slate-900 hover:file:opacity-90 file:cursor-pointer cursor-pointer"
+                                                        />
+                                                        {idBackPreview && (
+                                                            <img src={idBackPreview} alt="ID back preview" className="mt-2 max-h-40 rounded-lg border border-slate-200 dark:border-slate-700 object-contain" />
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {hasSavedId && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setReplacingId(false); setIdFrontFile(null); setIdBackFile(null); setIdFrontPreview(""); setIdBackPreview(""); }}
+                                                        className="text-xs font-medium text-slate-500 dark:text-slate-400 underline"
+                                                    >
+                                                        Cancel — use saved ID
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -1049,6 +1284,10 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                     </div>
                                 </div>
 
+                                <p className="text-center text-xs text-slate-500 dark:text-slate-400 mb-6 relative z-0">
+                                    Thank you for booking. This receipt is valid for 3 months.
+                                </p>
+
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -1084,7 +1323,7 @@ export const PatientBookingModal = ({ isOpen, onClose, onBookingSuccess, booking
                                                 <div class="row"><span class="label">Patient</span><span class="value">${patientName || ''}</span></div>
                                                 <div class="row"><span class="label">Receipt No.</span><span class="value receipt-no">${receiptNo}</span></div>
                                             </div>
-                                            <div class="footer">Thank you for choosing St. Gamaliel's Hospital</div>
+                                            <div class="footer">Thank you for booking with St. Gamaliel's Hospital. This receipt is valid for 3 months.</div>
                                         </body></html>`;
                                         const win = window.open('', '_blank', 'width=520,height=700');
                                         if (win) { win.document.write(html); win.document.close(); win.onload = () => win.print(); }
